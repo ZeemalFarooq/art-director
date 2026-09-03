@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Palette, X, Sparkles, Layers, Sliders, FileText } from "lucide-react";
+import { ArrowRight, Palette, X } from "lucide-react";
 import Link from "next/link";
 
 export default function Home() {
@@ -63,13 +63,12 @@ export default function Home() {
             <div className="prism-orbit orbit-one" />
             <div className="prism-orbit orbit-two" />
           </div>
-          <div className="stage-caption"><Sparkles className="w-3 h-3" /> A living point of view</div>
+          <div className="stage-caption">Strategic visual synthesis by Zeemal Farooq</div>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="w-full flex flex-col sm:flex-row justify-between items-center text-xs text-[#121212]/50 border-t border-[#d8d0c4] pt-6 gap-2 relative z-10">
-        <span>Strategic visual synthesis by Zeemal Farooq</span>
         <span>Studio Edition</span>
       </footer>
 
@@ -111,7 +110,7 @@ export default function Home() {
                 <div className="w-7 h-7 rounded-full bg-[#EFE9DF] flex items-center justify-center text-xs font-bold">3</div>
                 <h4 className="font-semibold text-base">Concept Battle</h4>
                 <p className="text-[#121212]/70 text-xs leading-relaxed">
-                  Evaluate three radical visual hypotheses accompanied by Devil's Advocate critiques exposing brand risks upfront.
+                  Evaluate three radical visual hypotheses accompanied by Devil&apos;s Advocate critiques exposing brand risks upfront.
                 </p>
               </div>
 

@@ -6,6 +6,8 @@ export async function POST(req: Request) {
   let primaryColor = "accent";
   let baseColor = "neutral";
   let headingFont = "editorial serif";
+  let bodyFont = "clean sans serif";
+  let conceptStyle = "editorial brand direction";
 
   try {
     const body = await req.json();
@@ -14,9 +16,11 @@ export async function POST(req: Request) {
     primaryColor = body.primaryColor || "accent";
     baseColor = body.baseColor || "neutral";
     headingFont = body.headingFont || "editorial serif";
+    bodyFont = body.bodyFont || "clean sans serif";
+    conceptStyle = body.conceptStyle || "editorial brand direction";
 
     const cleanSubject = brandName || prompt;
-    const socialPrompt = `A high-end square Instagram feed post mockup for "${cleanSubject}", professional graphic design layout, editorial social media brand campaign, featuring aesthetic product showcase with ${primaryColor} and ${baseColor} branded packaging, clean typography layout inspired by ${headingFont}, award winning branding photography, studio lighting, Behance featured, 8k resolution, crisp clean design composition`;
+    const socialPrompt = `Create a relevant high-end square editorial brand photograph for this exact idea: "${cleanSubject}". Visual subject and setting must clearly communicate the product, service, or event in that idea. Follow this AI art direction brief: "${prompt}". Direction: ${conceptStyle}. Palette inspiration: ${baseColor}, ${primaryColor}. Use tangible objects, believable materials, intentional composition, and premium studio or natural light. This is source artwork for an Instagram post, not a finished poster: absolutely no words, letters, logos, watermarks, UI, fake typography, or random products. The final image should leave calm negative space for a real text overlay using ${headingFont} and ${bodyFont}. Photorealistic, art-directed, square 1:1 composition.`;
 
     const apiKey = process.env.HUGGINGFACE_API_KEY;
 
@@ -54,8 +58,8 @@ export async function POST(req: Request) {
     const fallbackUrl = `https://image.pollinations.ai/prompt/${encoded}?width=1080&height=1080&model=flux&seed=${seed}&nologo=true`;
 
     return NextResponse.json({ imageUrl: fallbackUrl });
-  } catch (error: any) {
-    console.error("Image generation route error:", error);
+  } catch (error: unknown) {
+    console.error("Image generation route error:", error instanceof Error ? error.message : error);
     // Return fallback URL even on complete network error
     const seed = Math.floor(Math.random() * 900000 + 100000);
     const encoded = encodeURIComponent(`Instagram feed post mockup for ${brandName || "modern brand"}, 8k resolution`);
