@@ -2,13 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { 
-  ArrowUp, Palette, User, ArrowLeft, Check, Loader2, 
-  AlertTriangle, Swords, Type, Copy, Download, 
-  History, X, Image as ImageIcon, RefreshCw, Trash2, Edit3
+  Palette, User, ArrowLeft, Check, Loader2, 
+  Swords, Type, Download, History, X, 
+  Image as ImageIcon, RefreshCw, Trash2, Send, Bookmark
 } from "lucide-react";
 import Link from "next/link";
 
-// Clean, emoji-free aesthetic dimensions
 const EMOTIONS = [
   { id: "energetic", label: "Energetic" },
   { id: "sophisticated", label: "Sophisticated" },
@@ -65,6 +64,17 @@ interface SavedSession {
   brandData: BrandData;
   studioData: StudioData;
   imageUrl?: string;
+  messages: { role: string; content: string }[];
+}
+
+// Mathematical luminance calculation for WCAG contrast guarantees
+function getReadableTextColor(bgHex: string) {
+  const cleanHex = bgHex.replace('#', '');
+  const r = parseInt(cleanHex.substring(0, 2) || "255", 16);
+  const g = parseInt(cleanHex.substring(2, 4) || "255", 16);
+  const b = parseInt(cleanHex.substring(4, 6) || "255", 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 128 ? '#121212' : '#FFFFFF';
 }
 
 export default function SessionPage() {
@@ -78,20 +88,15 @@ export default function SessionPage() {
   const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
   const [studioLoading, setStudioLoading] = useState(false);
   const [studioData, setStudioData] = useState<StudioData | null>(null);
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
-  // Editable prompt & Lookbook image state
-  const [activePrompt, setActivePrompt] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
-
-  // History Drawer State
   const [historyOpen, setHistoryOpen] = useState(false);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([
     {
       role: "assistant",
       content: "Let us define your visual landscape. Describe your brand, product, and audience in your own words.",
@@ -100,7 +105,7 @@ export default function SessionPage() {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("art_director_sessions");
+      const stored = localStorage.getItem("art_director_history");
       if (stored) setSavedSessions(JSON.parse(stored));
     } catch (e) {
       console.error(e);
@@ -108,33 +113,118 @@ export default function SessionPage() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const timer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 150);
+    return () => clearTimeout(timer);
   }, [messages, showCards, loading, brandData, generatingDna, studioData, imageUrl]);
+
+  const saveCurrentToHistory = (latestStudio: StudioData, activeMessages: { role: string; content: string }[]) => {
+    if (!brandData || !selectedConcept) return;
+
+    const newRecord: SavedSession = {
+      id: Date.now().toString(),
+      date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      brandDesc,
+      personality: brandData.personality,
+      selectedConcept,
+      brandData,
+      studioData: latestStudio,
+      imageUrl: imageUrl || undefined,
+      messages: activeMessages,
+    };
+
+    setSavedSessions((prev) => {
+      const filtered = prev.filter(p => p.brandDesc !== brandDesc);
+      const updated = [newRecord, ...filtered.slice(0, 19)];
+      localStorage.setItem("art_director_history", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const loadPastSession = (s: SavedSession) => {
+    setBrandDesc(s.brandDesc);
+    setBrandData(s.brandData);
+    setSelectedConcept(s.selectedConcept);
+    setStudioData(s.studioData);
+    setImageUrl(s.imageUrl || null);
+    if (s.messages && s.messages.length > 0) {
+      setMessages(s.messages);
+    }
+    setHistoryOpen(false);
+  };
+
+  const deleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSavedSessions((prev) => {
+      const filtered = prev.filter(item => item.id !== id);
+      localStorage.setItem("art_director_history", JSON.stringify(filtered));
+      return filtered;
+    });
+  };
 
   const handleSend = async (e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || showCards || loading) return;
+    if (!input.trim() || loading || generatingDna || studioLoading) return;
 
-    const userText = input;
+    const userText = input.trim();
     setInput("");
-    setBrandDesc(userText);
-    setMessages((prev) => [...prev, { role: "user", content: userText }]);
+
+    const updatedMessages = [...messages, { role: "user", content: userText }];
+    setMessages(updatedMessages);
     setLoading(true);
 
+    if (!brandData) {
+      setBrandDesc(userText);
+      try {
+        const res = await fetch("/api/discovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userMessage: userText }),
+        });
+        const data = await res.json();
+        if (data.reply) {
+          setMessages([...updatedMessages, { role: "assistant", content: data.reply }]);
+          setShowCards(true);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
-      const res = await fetch("/api/discovery", {
+      const activeConceptObj = brandData.concepts.find(c => c.id === selectedConcept);
+      const res = await fetch("/api/refine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: userText }),
+        body: JSON.stringify({
+          userFeedback: userText,
+          brandDescription: brandDesc,
+          currentStudioData: studioData,
+          currentConcept: activeConceptObj,
+        }),
       });
 
       const data = await res.json();
-      if (data.reply) {
-        setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-        setShowCards(true);
+      if (data.updatedStudio) {
+        setStudioData(data.updatedStudio);
+        const finalMessages = [
+          ...updatedMessages,
+          { role: "assistant", content: `${data.assistantReply} What additional changes or details would you like to explore?` }
+        ];
+        setMessages(finalMessages);
+        triggerFluxRender(data.updatedStudio.heroPrompt, brandDesc, data.updatedStudio.colors);
+        saveCurrentToHistory(data.updatedStudio, finalMessages);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
+      setMessages([
+        ...updatedMessages,
+        { role: "assistant", content: "I encountered an issue processing your request. Please try stating what you'd like adjusted." }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -160,7 +250,8 @@ export default function SessionPage() {
       .map(id => EMOTIONS.find(e => e.id === id)?.label)
       .join(", ");
       
-    setMessages((prev) => [...prev, { role: "user", content: `Aesthetic Pillars: ${emotionLabels}` }]);
+    const newMsgThread = [...messages, { role: "user", content: `Aesthetic Pillars: ${emotionLabels}` }];
+    setMessages(newMsgThread);
     setShowCards(false);
     setGeneratingDna(true);
 
@@ -177,10 +268,13 @@ export default function SessionPage() {
       const data = await res.json();
       if (data.dna && data.concepts) {
         setBrandData(data);
+        setMessages([
+          ...newMsgThread,
+          { role: "assistant", content: "I calculated your Mood DNA and formulated 3 contrasting strategic trajectories. Select your preferred concept below to assemble the design kit." }
+        ]);
       }
     } catch (err) {
-      console.error("Failed to generate DNA:", err);
-      setShowCards(true);
+      console.error(err);
     } finally {
       setGeneratingDna(false);
     }
@@ -205,24 +299,35 @@ export default function SessionPage() {
       const data = await res.json();
       if (data.colors) {
         setStudioData(data);
-        setActivePrompt(data.heroPrompt);
-        triggerFluxRender(data.heroPrompt);
-        saveSessionToHistory(data);
+        triggerFluxRender(data.heroPrompt, brandDesc, data.colors);
+        const finalMessages = [
+          ...messages,
+          { 
+            role: "assistant", 
+            content: `The brand suite for Concept ${selectedConcept.toUpperCase()} is assembled. Review the live collateral billboard, color palette, and typography pairing below. Share your thoughts or request specific tweaks right here.` 
+          }
+        ];
+        setMessages(finalMessages);
+        saveCurrentToHistory(data, finalMessages);
       }
     } catch (err) {
-      console.error("Studio generation failed:", err);
+      console.error(err);
     } finally {
       setStudioLoading(false);
     }
   };
 
-  const triggerFluxRender = (promptText: string) => {
+  const triggerFluxRender = (promptText: string, subject: string, colorsList?: any[]) => {
     setImageLoading(true);
+    const primaryColor = colorsList?.[2]?.name || "focal";
+    const baseColor = colorsList?.[0]?.name || "base";
+
     const cleanPrompt = encodeURIComponent(
-      `${promptText}, award winning lookbook photography, photorealistic, 8k, highly detailed, centered composition, soft shadows, no distortion`
+      `commercial editorial product photograph of ${subject}, featuring ${primaryColor} and ${baseColor} materials, tactile textures, professional studio lighting, 8k resolution, photorealistic, centered composition, no text, no blur`
     );
-    const seed = Math.floor(Math.random() * 999999);
-    const url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1280&height=800&model=flux&seed=${seed}&nologo=true`;
+
+    const seed = Math.floor(Math.random() * 900000 + 100000);
+    const url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1200&height=800&model=flux&seed=${seed}&nologo=true`;
 
     const img = new Image();
     img.src = url;
@@ -235,111 +340,28 @@ export default function SessionPage() {
     };
   };
 
-  const saveSessionToHistory = (studio: StudioData) => {
-    if (!brandData || !selectedConcept) return;
-    const newSession: SavedSession = {
-      id: Date.now().toString(),
-      date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-      brandDesc,
-      personality: brandData.personality,
-      selectedConcept,
-      brandData,
-      studioData: studio,
-      imageUrl: imageUrl || undefined,
-    };
-
-    setSavedSessions((prev) => {
-      const updated = [newSession, ...prev.slice(0, 14)];
-      localStorage.setItem("art_director_sessions", JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const loadPastSession = (s: SavedSession) => {
-    setBrandDesc(s.brandDesc);
-    setBrandData(s.brandData);
-    setSelectedConcept(s.selectedConcept);
-    setStudioData(s.studioData);
-    setActivePrompt(s.studioData.heroPrompt);
-    setImageUrl(s.imageUrl || null);
-    setHistoryOpen(false);
-  };
-
-  const deleteSession = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSavedSessions((prev) => {
-      const filtered = prev.filter(item => item.id !== id);
-      localStorage.setItem("art_director_sessions", JSON.stringify(filtered));
-      return filtered;
-    });
-  };
-
-  const copyHeroPrompt = () => {
-    navigator.clipboard.writeText(activePrompt);
-    setCopiedPrompt(true);
-    setTimeout(() => setCopiedPrompt(false), 2000);
-  };
-
-  const exportBrief = () => {
-    if (!studioData || !brandData) return;
-    const activeConcept = brandData.concepts.find(c => c.id === selectedConcept);
-    const content = `# Creative Direction Brief: ${activeConcept?.title}
-**Brand:** ${brandDesc}
-**Personality:** ${brandData.personality}
-
-## Concept Direction
-- **Style:** ${activeConcept?.style}
-- **Tagline:** "${activeConcept?.tagline}"
-- **Summary:** ${activeConcept?.description}
-
-## Curated Color System
-${studioData.colors.map(c => `- **${c.name}** (${c.hex}) - ${c.role}: ${c.usage}`).join('\n')}
-
-## Typography Pairing
-- **Heading:** ${studioData.typography.heading.font} (${studioData.typography.heading.style})
-- **Body:** ${studioData.typography.body.font} (${studioData.typography.body.style})
-
-## Core Strategic Thesis
-${studioData.creativeBrief.coreThesis}
-
-## Execution Directives
-### Permitted
-${studioData.creativeBrief.doList.map(item => `- [x] ${item}`).join('\n')}
-
-### Prohibited
-${studioData.creativeBrief.dontList.map(item => `- [ ] Avoid: ${item}`).join('\n')}
-
-## Visual Prompt
-\`\`\`
-${activePrompt}
-\`\`\`
-`;
-
-    const blob = new Blob([content], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `brand-brief-${selectedConcept}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // Safe contrast calculations for live billboard preview
+  const canvasBg = studioData?.colors?.[1]?.hex || "#FFFFFF";
+  const canvasText = getReadableTextColor(canvasBg);
+  const heroBadgeBg = studioData?.colors?.[2]?.hex || "#B85D19";
+  const heroBadgeText = getReadableTextColor(heroBadgeBg);
+  const primaryBtnBg = studioData?.colors?.[0]?.hex || "#121212";
+  const primaryBtnText = getReadableTextColor(primaryBtnBg);
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F9F6F0] text-[#121212] selection:bg-[#B85D19] selection:text-white">
-      {/* Studio Header */}
-      <header className="sticky top-0 z-20 flex items-center justify-between px-6 py-4 bg-[#F9F6F0]/85 backdrop-blur-md border-b border-[#E2DACD]">
+      {/* Header */}
+      <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 bg-[#F9F6F0]/85 backdrop-blur-md border-b border-[#E2DACD]">
         <Link href="/" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider hover:text-[#B85D19] transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
           Exit Studio
         </Link>
-        
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-[#121212] flex items-center justify-center text-[#F9F6F0]">
             <Palette className="w-3.5 h-3.5" />
           </div>
           <span className="font-serif text-lg font-medium italic">Art Director</span>
         </div>
-
         <button
           onClick={() => setHistoryOpen(true)}
           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border border-[#E2DACD] hover:bg-[#EFE9DF] transition-colors"
@@ -356,8 +378,8 @@ ${activePrompt}
             <div>
               <div className="flex items-center justify-between border-b border-[#E2DACD] pb-4 mb-4">
                 <div className="flex items-center gap-2">
-                  <Palette className="w-4 h-4 text-[#B85D19]" />
-                  <h3 className="font-serif text-xl font-medium">Session Archive</h3>
+                  <Bookmark className="w-4 h-4 text-[#B85D19]" />
+                  <h3 className="font-serif text-xl font-medium">Archived Sessions</h3>
                 </div>
                 <button onClick={() => setHistoryOpen(false)} className="p-1 hover:bg-[#EFE9DF] rounded-full">
                   <X className="w-4 h-4" />
@@ -365,7 +387,7 @@ ${activePrompt}
               </div>
 
               {savedSessions.length === 0 ? (
-                <p className="text-xs text-[#121212]/50 text-center py-12">No archived sessions. Generated visual suites are preserved here automatically.</p>
+                <p className="text-xs text-[#121212]/50 text-center py-12">No saved brand sessions yet.</p>
               ) : (
                 <div className="space-y-3 overflow-y-auto max-h-[75vh] pr-1">
                   {savedSessions.map((s) => (
@@ -380,7 +402,7 @@ ${activePrompt}
                           <span className="text-[10px] text-[#121212]/40 font-mono">{s.date}</span>
                         </div>
                         <h4 className="font-medium text-xs line-clamp-1">{s.brandDesc}</h4>
-                        <span className="text-[11px] text-[#121212]/60">Concept {s.selectedConcept.toUpperCase()}</span>
+                        <span className="text-[11px] text-[#121212]/60">Concept {s.selectedConcept?.toUpperCase()}</span>
                       </div>
                       <button
                         onClick={(e) => deleteSession(s.id, e)}
@@ -395,25 +417,30 @@ ${activePrompt}
             </div>
 
             <div className="text-[11px] text-[#121212]/50 text-center pt-4 border-t border-[#E2DACD]">
-              Locally persisted in browser sandbox.
+              Locally persisted in browser storage.
             </div>
           </div>
           <div className="flex-1" onClick={() => setHistoryOpen(false)} />
         </div>
       )}
 
-      {/* Main Container */}
-      <main className="flex-1 w-full max-w-4xl mx-auto p-6 pb-40 flex flex-col gap-8">
+      {/* Main Stream */}
+      <main className="flex-1 w-full max-w-4xl mx-auto p-6 pb-48 flex flex-col gap-6">
         
-        {/* Timeline Messages */}
+        {/* Chat Timeline */}
         {messages.map((msg, index) => (
-          <div key={index} className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+          <div 
+            key={index} 
+            className={`flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+              msg.role === "user" ? "justify-end" : "justify-start"
+            }`}
+          >
             {msg.role === "assistant" ? (
               <div className="flex gap-4 max-w-[85%]">
                 <div className="w-8 h-8 rounded-full bg-[#121212] flex items-center justify-center shrink-0 mt-0.5 text-[#F9F6F0]">
                   <Palette className="w-4 h-4 stroke-[1.75]" />
                 </div>
-                <div className="text-xl leading-relaxed tracking-tight font-serif text-[#121212]">
+                <div className="text-lg leading-relaxed font-serif text-[#121212]">
                   {msg.content}
                 </div>
               </div>
@@ -422,7 +449,7 @@ ${activePrompt}
                 <div className="w-8 h-8 rounded-full bg-[#EFE9DF] border border-[#E2DACD] flex items-center justify-center shrink-0 mt-0.5">
                   <User className="w-4 h-4 text-[#121212]" />
                 </div>
-                <div className="text-base leading-relaxed bg-[#121212] text-[#F9F6F0] px-6 py-4 rounded-3xl rounded-tr-sm font-light">
+                <div className="text-base leading-relaxed bg-[#121212] text-[#F9F6F0] px-6 py-3.5 rounded-3xl rounded-tr-sm font-light">
                   {msg.content}
                 </div>
               </div>
@@ -431,15 +458,15 @@ ${activePrompt}
         ))}
 
         {loading && (
-          <div className="flex gap-3 items-center text-[#121212]/60 ml-2 text-xs uppercase tracking-widest font-semibold">
+          <div className="flex gap-3 items-center text-[#121212]/60 ml-2 text-xs uppercase tracking-widest font-semibold animate-pulse">
             <Loader2 className="w-4 h-4 animate-spin text-[#B85D19]" />
-            Evaluating brand parameters...
+            Art Director is recalibrating your vision...
           </div>
         )}
 
-        {/* Emotion Pillar Selectors */}
+        {/* Emotion Pills */}
         {showCards && (
-          <div className="ml-12 grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="ml-12 grid grid-cols-2 sm:grid-cols-3 gap-3 animate-in fade-in duration-300">
             {EMOTIONS.map((emotion) => {
               const isSelected = selectedEmotions.includes(emotion.id);
               return (
@@ -473,306 +500,229 @@ ${activePrompt}
           </div>
         )}
 
-        {generatingDna && (
-          <div className="p-8 rounded-3xl bg-white border border-[#E2DACD] flex flex-col items-center justify-center gap-3 text-center my-4">
-            <Loader2 className="w-6 h-6 animate-spin text-[#B85D19]" />
-            <div>
-              <h3 className="font-serif text-lg font-medium">Synthesizing Mood DNA & Concept Battler</h3>
-              <p className="text-xs text-[#121212]/60 mt-0.5">Extracting visual archetypes and challenging surface-level clichés...</p>
+        {/* Concept Battler */}
+        {brandData && !studioData && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2">
+              <Swords className="w-5 h-5 text-[#B85D19]" />
+              <h2 className="text-2xl font-serif font-medium tracking-tight">Select Creative Concept</h2>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {brandData.concepts.map((concept) => {
+                const isChosen = selectedConcept === concept.id;
+                return (
+                  <div 
+                    key={concept.id}
+                    onClick={() => setSelectedConcept(concept.id)}
+                    className={`cursor-pointer rounded-3xl p-5 flex flex-col justify-between transition-all border ${
+                      isChosen
+                        ? "bg-[#121212] text-[#F9F6F0] border-[#121212] shadow-lg scale-[1.01]"
+                        : "bg-white text-[#121212] border-[#E2DACD] hover:border-[#B85D19]"
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                        isChosen ? "bg-[#B85D19] text-white" : "bg-[#EFE9DF] text-[#121212]"
+                      }`}>
+                        Concept {concept.id.toUpperCase()}
+                      </span>
+                      <h3 className="font-serif text-xl font-medium">{concept.title}</h3>
+                      <p className="text-xs opacity-75 font-light">{concept.description}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {selectedConcept && (
+              <div className="flex justify-center pt-2">
+                <button 
+                  onClick={generateStudio}
+                  disabled={studioLoading}
+                  className="bg-[#B85D19] text-white px-8 py-3.5 rounded-full text-xs uppercase tracking-widest font-semibold hover:bg-[#964a12] transition-all flex items-center gap-2"
+                >
+                  {studioLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Build Visual Identity Studio →"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Mood DNA Display */}
-        {brandData && brandData.dna && (
-          <div className="space-y-12">
-            <div className="border-t border-[#E2DACD] pt-10">
-              <span className="text-xs uppercase tracking-[0.2em] font-semibold text-[#B85D19]">Strategic Framework</span>
-              <h2 className="text-3xl font-serif font-medium tracking-tight mt-1">Brand's Mood DNA</h2>
-              <p className="text-xs text-[#121212]/60 mt-1">Archetype Profile: <span className="font-semibold text-[#121212]">{brandData.personality}</span></p>
-            </div>
+        {/* Visual Studio Suite */}
+        {studioData && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            
+            {/* High-Contrast Dynamic Collateral Billboard */}
+            <div 
+              className="rounded-3xl p-8 border-2 shadow-xl relative overflow-hidden transition-all duration-500 flex flex-col justify-between min-h-[380px]"
+              style={{ 
+                backgroundColor: canvasBg,
+                borderColor: primaryBtnBg,
+                color: canvasText
+              }}
+            >
+              <div className="flex justify-between items-start border-b pb-4" style={{ borderColor: `${primaryBtnBg}25` }}>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[11px] uppercase tracking-widest px-3 py-1 rounded-full font-bold shadow-sm"
+                    style={{ 
+                      backgroundColor: heroBadgeBg, 
+                      color: heroBadgeText 
+                    }}
+                  >
+                    Live Mockup Proof
+                  </span>
+                  <span className="text-xs font-mono uppercase font-semibold opacity-75">
+                    {studioData.typography?.heading?.font}
+                  </span>
+                </div>
+                <span className="text-xs font-bold tracking-wider uppercase opacity-60">Identity System</span>
+              </div>
 
-            {/* Metric Meters */}
-            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-4 shadow-sm">
-              {Object.entries(brandData.dna).map(([trait, score]) => (
-                <div key={trait} className="space-y-1">
-                  <div className="flex justify-between text-xs font-semibold uppercase tracking-wider">
-                    <span>{trait}</span>
-                    <span className="font-mono">{score}%</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-[#EFE9DF] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-[#121212] rounded-full transition-all duration-1000" 
-                      style={{ width: `${score}%` }} 
-                    />
-                  </div>
-                </div>
-              ))}
+              <div className="my-8 space-y-4">
+                <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight leading-none capitalize">
+                  {brandDesc}
+                </h1>
+                <p className="text-base md:text-lg max-w-2xl font-medium leading-relaxed opacity-90">
+                  {studioData.creativeBrief?.coreThesis || "A distinctive visual identity built on deliberate hierarchy and craft."}
+                </p>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-[#E2DACD]">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#B85D19]">Embrace (Keywords)</span>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {brandData.keywords.map((kw, i) => (
-                      <span key={i} className="text-xs px-3 py-1 rounded-full bg-[#EFE9DF] font-medium">{kw}</span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-red-700">Avoid (Clichés)</span>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {brandData.avoid.map((av, i) => (
-                      <span key={i} className="text-xs px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 font-medium line-through">{av}</span>
-                    ))}
-                  </div>
-                </div>
+              <div className="flex flex-wrap items-center gap-3 pt-4 border-t" style={{ borderColor: `${primaryBtnBg}25` }}>
+                <button 
+                  className="px-6 py-3 rounded-full text-xs font-bold uppercase tracking-wider shadow-md transition-transform active:scale-95"
+                  style={{ 
+                    backgroundColor: primaryBtnBg, 
+                    color: primaryBtnText 
+                  }}
+                >
+                  Explore Collection
+                </button>
+                <button 
+                  className="px-6 py-3 rounded-full text-xs font-bold uppercase tracking-wider border-2 transition-transform active:scale-95"
+                  style={{ 
+                    borderColor: primaryBtnBg,
+                    color: canvasText
+                  }}
+                >
+                  View Specifications
+                </button>
               </div>
             </div>
 
-            {/* Concept Battler */}
-            <div>
-              <div className="flex items-center gap-2 mb-6">
-                <Swords className="w-5 h-5 text-[#B85D19]" />
-                <h2 className="text-2xl font-serif font-medium tracking-tight">Concept Battle: Select Trajectory</h2>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {brandData.concepts.map((concept) => {
-                  const isChosen = selectedConcept === concept.id;
-                  return (
-                    <div 
-                      key={concept.id}
-                      onClick={() => setSelectedConcept(concept.id)}
-                      className={`cursor-pointer rounded-3xl p-6 flex flex-col justify-between transition-all border ${
-                        isChosen
-                          ? "bg-[#121212] text-[#F9F6F0] border-[#121212] scale-[1.02] shadow-xl"
-                          : "bg-white text-[#121212] border-[#E2DACD] hover:border-[#B85D19]"
-                      }`}
-                    >
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-start">
-                          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
-                            isChosen ? "bg-[#B85D19] text-white" : "bg-[#EFE9DF] text-[#121212]"
-                          }`}>
-                            Concept {concept.id.toUpperCase()}
-                          </span>
-                          <span className="text-[11px] opacity-60 font-medium">{concept.style}</span>
-                        </div>
-
-                        <h3 className="font-serif text-2xl font-medium">{concept.title}</h3>
-                        <p className={`text-xs italic ${isChosen ? "text-[#EFE9DF]" : "text-[#121212]/70"}`}>
-                          "{concept.tagline}"
-                        </p>
-                        <p className="text-xs leading-relaxed opacity-80 font-light">{concept.description}</p>
-                      </div>
-
-                      <div className={`mt-6 p-4 rounded-2xl border text-xs space-y-1 ${
-                        isChosen 
-                          ? "bg-white/10 border-white/20 text-[#F9F6F0]" 
-                          : "bg-[#F9F6F0] border-[#E2DACD] text-[#121212]/80"
-                      }`}>
-                        <div className="flex items-center gap-1.5 font-semibold text-[11px]">
-                          <AlertTriangle className="w-3 h-3 text-[#B85D19]" />
-                          <span>Devil's Advocate</span>
-                        </div>
-                        <p className="leading-snug text-[11px] opacity-90">{concept.devilsAdvocate}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {selectedConcept && !studioData && (
-                <div className="mt-8 flex justify-center">
+            {/* Lookbook & Color System */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Photo */}
+              <div className="bg-white p-5 rounded-3xl border border-[#E2DACD] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 text-[#B85D19]">
+                    <ImageIcon className="w-3.5 h-3.5" /> Lookbook Visual
+                  </span>
                   <button 
-                    onClick={generateStudio}
-                    disabled={studioLoading}
-                    className="bg-[#B85D19] text-white px-8 py-4 rounded-full text-xs uppercase tracking-widest font-semibold shadow-lg hover:bg-[#964a12] transition-all flex items-center gap-2"
+                    onClick={() => triggerFluxRender(studioData.heroPrompt, brandDesc, studioData.colors)}
+                    className="p-1 hover:bg-[#EFE9DF] rounded-full"
                   >
-                    {studioLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Synthesizing Studio Assets...
-                      </>
-                    ) : (
-                      <>Assemble Brand Suite: Concept {selectedConcept.toUpperCase()} →</>
-                    )}
+                    <RefreshCw className={`w-3.5 h-3.5 ${imageLoading ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
-              )}
+                {imageLoading ? (
+                  <div className="h-64 rounded-2xl bg-[#F9F6F0] flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-[#B85D19]" />
+                    <span className="text-xs text-[#121212]/50">Synthesizing photographic lookbook...</span>
+                  </div>
+                ) : imageUrl ? (
+                  <img src={imageUrl} alt="Lookbook" className="w-full h-64 object-cover rounded-2xl shadow-sm" />
+                ) : null}
+              </div>
+
+              {/* Color Palette */}
+              <div className="bg-white p-5 rounded-3xl border border-[#E2DACD] flex flex-col justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#B85D19] mb-3 block">
+                  Curated Color Palette
+                </span>
+                <div className="grid grid-cols-2 gap-3 flex-1">
+                  {studioData.colors.map((c, i) => (
+                    <div key={i} className="p-3 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/40 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl shadow-inner border border-black/10 shrink-0" style={{ backgroundColor: c.hex }} />
+                      <div className="overflow-hidden">
+                        <span className="text-xs font-bold block truncate text-[#121212]">{c.name}</span>
+                        <code className="text-[11px] text-[#121212]/70 font-mono font-semibold block">{c.hex}</code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
 
-            {/* Production Studio */}
-            {studioData && (
-              <div className="space-y-10 border-t border-[#E2DACD] pt-10">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <span className="text-xs uppercase tracking-[0.2em] font-semibold text-[#B85D19]">Production Kit</span>
-                    <h2 className="text-3xl font-serif font-medium tracking-tight">Art Director's Execution Suite</h2>
-                  </div>
-                  <button
-                    onClick={exportBrief}
-                    className="flex items-center gap-2 bg-[#121212] text-[#F9F6F0] px-5 py-3 rounded-full text-xs uppercase tracking-wider font-semibold hover:bg-black transition-colors self-start"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download Kit (.md)
-                  </button>
-                </div>
-
-                {/* AI Editorial Lookbook Visualizer with Prompt Refinement */}
-                <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ImageIcon className="w-4 h-4 text-[#B85D19]" />
-                      <h3 className="font-serif text-xl font-medium">Editorial Lookbook Preview</h3>
-                    </div>
-                    <button
-                      onClick={() => triggerFluxRender(activePrompt)}
-                      disabled={imageLoading}
-                      className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 border border-[#E2DACD] rounded-full hover:bg-[#EFE9DF] transition-colors"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${imageLoading ? 'animate-spin' : ''}`} />
-                      Re-render
-                    </button>
-                  </div>
-
-                  {imageLoading ? (
-                    <div className="w-full h-80 rounded-2xl bg-[#F9F6F0] flex flex-col items-center justify-center gap-2 border border-dashed border-[#E2DACD]">
-                      <Loader2 className="w-6 h-6 animate-spin text-[#B85D19]" />
-                      <span className="text-xs text-[#121212]/60 font-medium">Synthesizing photograph via Flux...</span>
-                    </div>
-                  ) : imageUrl ? (
-                    <div className="relative rounded-2xl overflow-hidden border border-[#E2DACD] shadow-sm">
-                      <img 
-                        src={imageUrl} 
-                        alt="Editorial Photography" 
-                        className="w-full h-auto max-h-[500px] object-cover"
-                      />
-                      <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-black/80 to-transparent text-white text-[11px] font-mono">
-                        Rendered with Flux.1 Precision Architecture
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Inline Prompt Editor for fine-tuning image outcomes */}
-                  <div className="pt-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#121212]/60 flex items-center gap-1.5">
-                        <Edit3 className="w-3 h-3" />
-                        Prompt Directives
-                      </span>
-                      <button 
-                        onClick={copyHeroPrompt} 
-                        className="text-[11px] font-semibold text-[#B85D19] hover:underline flex items-center gap-1"
-                      >
-                        {copiedPrompt ? "Copied to clipboard" : "Copy prompt"}
-                      </button>
-                    </div>
-                    <textarea 
-                      value={activePrompt}
-                      onChange={(e) => setActivePrompt(e.target.value)}
-                      rows={3}
-                      className="w-full p-3 text-xs bg-[#F9F6F0] border border-[#E2DACD] rounded-xl font-mono focus:outline-none focus:border-[#B85D19] leading-relaxed resize-none"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => triggerFluxRender(activePrompt)}
-                        disabled={imageLoading}
-                        className="bg-[#121212] text-[#F9F6F0] text-xs px-4 py-2 rounded-full font-medium hover:bg-[#B85D19] transition-colors"
-                      >
-                        Generate with Edited Prompt
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Color Palette Swatches */}
-                <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-6">
-                  <div className="flex items-center gap-2">
-                    <Palette className="w-4 h-4 text-[#B85D19]" />
-                    <h3 className="font-serif text-xl font-medium">Curated Color System</h3>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {studioData.colors.map((c, i) => (
-                      <div key={i} className="flex flex-col gap-2 p-3 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/40">
-                        <div 
-                          className="h-20 w-full rounded-xl shadow-inner border border-black/5" 
-                          style={{ backgroundColor: c.hex }} 
-                        />
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-[#121212]/50 block">{c.role}</span>
-                          <span className="font-semibold text-xs block">{c.name}</span>
-                          <code className="text-[11px] bg-[#EFE9DF] px-1.5 py-0.5 rounded font-mono mt-1 inline-block">{c.hex}</code>
-                        </div>
-                        <p className="text-[11px] text-[#121212]/70 leading-relaxed mt-1">{c.usage}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Typography System */}
-                <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-6">
-                  <div className="flex items-center gap-2">
-                    <Type className="w-4 h-4 text-[#B85D19]" />
-                    <h3 className="font-serif text-xl font-medium">Typographic Scale</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/50">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Display & Title Hierarchy</span>
-                      <h4 className="text-2xl font-serif font-bold mt-2">{studioData.typography.heading.font}</h4>
-                      <p className="text-xs text-[#121212]/60 mt-1 font-light">{studioData.typography.heading.style}</p>
-                    </div>
-
-                    <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/50">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Interface & Body</span>
-                      <h4 className="text-xl font-sans font-medium mt-2">{studioData.typography.body.font}</h4>
-                      <p className="text-xs text-[#121212]/60 mt-1 font-light">{studioData.typography.body.style}</p>
-                    </div>
-                  </div>
-                </div>
-
+            {/* Typography Scale */}
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-4">
+              <div className="flex items-center gap-2">
+                <Type className="w-4 h-4 text-[#B85D19]" />
+                <h3 className="font-serif text-xl font-medium">Typographic Scale & Pairings</h3>
               </div>
-            )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Display & Title Hierarchy</span>
+                  <h4 className="text-2xl font-serif font-bold pt-1 text-[#121212]">
+                    {studioData.typography?.heading?.font || "Cabinet Grotesk"}
+                  </h4>
+                  <p className="text-xs text-[#121212]/80 font-medium">
+                    {studioData.typography?.heading?.style || "Tight tracking, optical kerning, bold impact"}
+                  </p>
+                </div>
+
+                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Interface & Body</span>
+                  <h4 className="text-xl font-sans font-semibold pt-1 text-[#121212]">
+                    {studioData.typography?.body?.font || "General Sans"}
+                  </h4>
+                  <p className="text-xs text-[#121212]/80 font-medium">
+                    {studioData.typography?.body?.style || "Neutral geometric clarity, comfortable line height"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Discovery Input Bar */}
-      {!brandData && (
-        <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[#F9F6F0] via-[#F9F6F0] to-transparent pt-10 pb-8 px-6 z-10">
-          <div className="max-w-3xl mx-auto relative">
-            <div className="relative flex items-center">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={showCards || loading || generatingDna}
-                placeholder={
-                  loading 
-                    ? "Art Director is evaluating..." 
-                    : showCards 
-                    ? "Select aesthetic pillars above..." 
-                    : "e.g. Minimalist modular furniture tailored for compact studios..."
-                }
-                className="w-full bg-white border border-[#E2DACD] rounded-full pl-6 pr-14 py-4 text-base focus:outline-none focus:border-[#B85D19] shadow-sm transition-colors disabled:opacity-50 font-light"
-              />
-              <button 
-                type="button"
-                onClick={handleSend}
-                disabled={!input.trim() || showCards || loading || generatingDna}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-[#121212] text-[#F9F6F0] rounded-full flex items-center justify-center hover:bg-[#B85D19] disabled:opacity-50 transition-all"
-              >
-                <ArrowUp className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Input Bar */}
+      <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[#F9F6F0] via-[#F9F6F0] to-transparent pt-6 pb-6 px-6 z-20">
+        <div className="max-w-3xl mx-auto relative">
+          <div className="relative flex items-center">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={showCards || loading || generatingDna || studioLoading}
+              placeholder={
+                studioData 
+                  ? "Critique or refine (e.g. 'Shift palette to darker earth tones and make the display font more geometric')..." 
+                  : showCards 
+                  ? "Select aesthetic pillars above..." 
+                  : "Describe any brand, product, or event..."
+              }
+              className="w-full bg-white border border-[#E2DACD] rounded-full pl-6 pr-14 py-4 text-sm focus:outline-none focus:border-[#B85D19] shadow-sm transition-all duration-200 disabled:opacity-50"
+            />
+            <button 
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim() || showCards || loading || generatingDna || studioLoading}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-[#121212] text-[#F9F6F0] rounded-full flex items-center justify-center hover:bg-[#B85D19] disabled:opacity-50 transition-all duration-200"
+            >
+              <Send className="w-4 h-4" />
+            </button>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

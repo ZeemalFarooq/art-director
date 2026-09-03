@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     const { userMessage } = await req.json();
 
     const { text } = await generateText({
-      model: groq('llama-3.3-70b-versatile'),
+     model: groq('openai/gpt-oss-120b'),
       system: `You are an elite AI Art Director and brand strategist. 
       Analyze the user's brand description with a sharp, creative perspective. 
       Give a concise 1-2 sentence response validating and shaping their vision, then end by asking:

@@ -1,4 +1,4 @@
-import { google } from '@ai-sdk/google';
+import { groq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
 
@@ -31,7 +31,7 @@ Analyze this brand and output a valid JSON object strictly matching this schema 
   "concepts": [
     {
       "id": "a",
-      "title": "Little Explorers",
+      "title": "Heritage Explorers",
       "tagline": "Built for muddy knees and bright ideas",
       "emotion": "Playful",
       "style": "Retro Utility",
@@ -60,61 +60,55 @@ Analyze this brand and output a valid JSON object strictly matching this schema 
 }
 `;
 
-    // maxRetries: 0 stops the SDK from hanging when 429 occurs
     const { text } = await generateText({
-      model: groq('llama-3.3-70b-versatile'),
+      model: groq('openai/gpt-oss-120b'),
       system: "You are an elite Creative Director. Output valid raw JSON only.",
       prompt,
-      maxRetries: 0,
     });
 
     const cleanJson = text.replace(/```json/i, '').replace(/```/g, '').trim();
     return NextResponse.json(JSON.parse(cleanJson));
   } catch (error: any) {
-    console.warn("Gemini Quota Exceeded (429) or Unavailable. Serving synthesized fallback.");
-
-    // Contextual algorithm based on user's actual brand input and chosen emotions
-    const isPlayful = emotions.some(e => e.toLowerCase().includes("playful") || e.toLowerCase().includes("energetic"));
-    const isCalm = emotions.some(e => e.toLowerCase().includes("calm") || e.toLowerCase().includes("sophisticated"));
+    console.warn("DNA generation fallback engaged:", error?.message);
 
     return NextResponse.json({
       dna: {
-        sophistication: isCalm ? 85 : 60,
-        energy: emotions.some(e => e.toLowerCase().includes("energetic")) ? 90 : 55,
-        warmth: emotions.some(e => e.toLowerCase().includes("warm")) ? 90 : 70,
-        playfulness: isPlayful ? 95 : 45,
-        minimalism: isCalm ? 85 : 50,
+        sophistication: 70,
+        energy: emotions.some(e => e.toLowerCase().includes("energetic")) ? 85 : 60,
+        warmth: emotions.some(e => e.toLowerCase().includes("warm")) ? 90 : 65,
+        playfulness: emotions.some(e => e.toLowerCase().includes("playful")) ? 90 : 50,
+        minimalism: emotions.some(e => e.toLowerCase().includes("calm")) ? 80 : 55,
       },
-      personality: isPlayful ? "Playful Tactile Archetype" : "Refined Essentialist",
-      keywords: ["Authentic", "Tactile", "Functional", "Characterful"],
-      avoid: ["Derivative Tropes", "Visual Clutter", "Corporate Genericness"],
+      personality: "Contextual Modern Archetype",
+      keywords: ["Authentic", "Distinctive", "Tactile", "Intentional"],
+      avoid: ["Derivative Tropes", "Visual Clutter", "Generic Aesthetics"],
       concepts: [
         {
           id: "a",
-          title: "Heritage Explorers",
-          tagline: "Designed for living, built to last",
+          title: "Rooted Narrative",
+          tagline: "Designed for purpose, crafted to last",
           emotion: emotions[0] || "Warm",
-          style: "Tactile Utility",
-          description: `A grounded aesthetic tailored for ${brandDescription.slice(0, 30)}. Emphasizes sturdy textures and deliberate details.`,
-          devilsAdvocate: "Could feel overly utilitarian if softer accent tones are neglected."
+          style: "Tactile Grounded",
+          description: `An organic visual language tailored for ${brandDescription.slice(0, 30)}.`,
+          devilsAdvocate: "Could skew overly subtle if strong focal contrast is neglected."
         },
         {
           id: "b",
-          title: "Kinetic Wonder",
-          tagline: "Movement over perfection",
+          title: "Kinetic Edge",
+          tagline: "Bold clarity in every dimension",
           emotion: emotions[1] || "Energetic",
-          style: "Bold Contemporary",
-          description: "High-contrast dynamic layouts with spontaneous typography and saturated focal points.",
-          devilsAdvocate: "Can introduce brand fatigue if loud visuals are applied without sufficient breathing room."
+          style: "Contemporary Dynamic",
+          description: "High-contrast layouts, directional balance, and decisive typographic presence.",
+          devilsAdvocate: "Can overwhelm the audience without adequate white space."
         },
         {
           id: "c",
-          title: "Silent Horizon",
-          tagline: "Unspoken quality speaks loudest",
+          title: "Silent Precision",
+          tagline: "Unspoken distinction speaks loudest",
           emotion: emotions[2] || "Sophisticated",
-          style: "Nordic Minimal",
-          description: "Muted monochromatic gradients, thoughtful micro-details, and generous negative space.",
-          devilsAdvocate: "Demands impeccable physical materials to avoid appearing unfinished."
+          style: "Minimalist Editorial",
+          description: "Muted monochromatic tones with deliberate micro-details.",
+          devilsAdvocate: "Demands premium production finishes to avoid feeling unfinished."
         }
       ]
     });
