@@ -8,12 +8,12 @@ export default function Home() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   return (
-    <main className="min-h-screen bg-[#F9F6F0] text-[#121212] flex flex-col justify-between p-6 md:p-16 selection:bg-[#B85D19] selection:text-white">
+    <main className="home-shell min-h-screen text-[#121212] flex flex-col justify-between px-6 py-6 md:px-16 md:py-10 selection:bg-[#B85D19] selection:text-white">
       
       {/* Editorial Header with Art Palette Logo */}
-      <header className="w-full flex justify-between items-center border-b border-[#E2DACD] pb-6">
+      <header className="w-full flex justify-between items-center border-b border-[#d8d0c4] pb-6 relative z-10">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-full bg-[#121212] flex items-center justify-center text-[#F9F6F0] group-hover:bg-[#B85D19] transition-colors">
+          <div className="logo-mark w-9 h-9 rounded-full bg-[#121212] flex items-center justify-center text-[#F9F6F0] group-hover:bg-[#B85D19] transition-colors">
             <Palette className="w-4 h-4 stroke-[1.75]" />
           </div>
           <span className="font-serif text-2xl tracking-tight font-medium italic">
@@ -23,40 +23,52 @@ export default function Home() {
        
       </header>
 
-      {/* Hero Section */}
-      <div className="max-w-4xl mx-auto text-center space-y-8 my-auto py-12">
-        <span className="text-xs uppercase tracking-[0.25em] font-semibold text-[#B85D19]">
+      <section className="hero-grid max-w-7xl mx-auto w-full my-auto py-10 md:py-16">
+        <div className="hero-copy space-y-7 relative z-10">
+        <span className="eyebrow text-xs uppercase tracking-[0.25em] font-semibold text-[#B85D19]">
           Autonomous Brand Direction & Aesthetics
         </span>
         
-        <h1 className="text-3xl md:text-5xl font-serif font-normal tracking-tight leading-[1.08] text-[#121212]">
-          Do not settle for generic ideas. 
-          <span className="italic font-light text-[#B85D19]"> Architect distinct visual identity.</span>
+        <h1 className="text-4xl md:text-6xl font-serif font-normal tracking-tight leading-[1.03] text-[#121212]">
+          Make the idea
+          <span className="block italic font-light text-[#B85D19]">impossible to ignore.</span>
         </h1>
         
-        <p className="text-lg md:text-xl text-[#121212]/70 max-w-2xl mx-auto leading-relaxed font-light">
+        <p className="text-base md:text-lg text-[#121212]/70 max-w-xl leading-relaxed font-light">
           An editorial creative director engine that converts vague project visions into structured Mood DNA, contrasting design directions, and production-ready visual kits.
         </p>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-3">
           <Link 
             href="/session" 
-            className="group flex items-center gap-3 bg-[#121212] text-[#F9F6F0] px-8 py-4 rounded-full text-sm font-medium hover:bg-[#B85D19] transition-all shadow-sm"
+            className="group flex items-center gap-3 bg-[#121212] text-[#F9F6F0] px-7 py-3.5 rounded-full text-sm font-medium hover:bg-[#B85D19] transition-all shadow-sm"
           >
             Enter Creative Session
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </Link>
           <button 
             onClick={() => setShowHowItWorks(true)}
-            className="px-8 py-4 rounded-full text-sm font-medium text-[#121212] border border-[#E2DACD] hover:bg-[#EFE9DF] transition-colors"
+            className="px-7 py-3.5 rounded-full text-sm font-medium text-[#121212] border border-[#cfc5b7] hover:bg-[#efe9df] transition-colors"
           >
             See How It Works
           </button>
         </div>
-      </div>
+        </div>
+        <div className="prism-stage" aria-hidden="true">
+          <div className="prism-shadow" />
+          <div className="prism-scene">
+            <div className="prism prism-back"><span>FORM</span></div>
+            <div className="prism prism-mid"><span>MOOD</span></div>
+            <div className="prism prism-front"><span>DNA</span></div>
+            <div className="prism-orbit orbit-one" />
+            <div className="prism-orbit orbit-two" />
+          </div>
+          <div className="stage-caption"><Sparkles className="w-3 h-3" /> A living point of view</div>
+        </div>
+      </section>
 
       {/* Footer */}
-      <footer className="w-full flex flex-col sm:flex-row justify-between items-center text-xs text-[#121212]/50 border-t border-[#E2DACD] pt-6 gap-2">
+      <footer className="w-full flex flex-col sm:flex-row justify-between items-center text-xs text-[#121212]/50 border-t border-[#d8d0c4] pt-6 gap-2 relative z-10">
         <span>Strategic visual synthesis by Zeemal Farooq</span>
         <span>Studio Edition</span>
       </footer>

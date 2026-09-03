@@ -1,12 +1,39 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Palette, User, ArrowLeft, Check, Loader2, 
-  Swords, Type, Download, History, X, 
-  Image as ImageIcon, RefreshCw, Trash2, Send, Bookmark
+  Swords, Type, History, X, 
+  RefreshCw, Trash2, Send, Bookmark, Lock, Unlock, Sliders, Copy
 } from "lucide-react";
 import Link from "next/link";
+import { 
+  generateGoogleFontUrl, 
+  getFontjoyGeneration, 
+  FontjoySystem,
+  POPULAR_HEADINGS,
+  POPULAR_SUBHEADS,
+  POPULAR_BODIES
+} from "@/lib/fontEngine";
+import { fetchHuemintCustom } from "@/lib/huemint";
+
+function InstagramIcon({ className = "w-4 h-4 text-[#B85D19]" }: { className?: string }) {
+  return (
+    <svg 
+      className={className} 
+      viewBox="0 0 24 24" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    >
+      <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+      <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+    </svg>
+  );
+}
 
 const EMOTIONS = [
   { id: "energetic", label: "Energetic" },
@@ -45,6 +72,7 @@ interface StudioData {
   colors: { role: string; hex: string; name: string; usage: string }[];
   typography: {
     heading: { font: string; style: string };
+    subhead?: { font: string; style: string };
     body: { font: string; style: string };
   };
   heroPrompt: string;
@@ -67,7 +95,6 @@ interface SavedSession {
   messages: { role: string; content: string }[];
 }
 
-// Mathematical luminance calculation for WCAG contrast guarantees
 function getReadableTextColor(bgHex: string) {
   const cleanHex = bgHex.replace('#', '');
   const r = parseInt(cleanHex.substring(0, 2) || "255", 16);
@@ -89,12 +116,23 @@ export default function SessionPage() {
   const [studioLoading, setStudioLoading] = useState(false);
   const [studioData, setStudioData] = useState<StudioData | null>(null);
 
+  // Huemint Interactive Controls
+  const [lockedColors, setLockedColors] = useState<boolean[]>([false, false, false, false]);
+  const [huemintTemp, setHuemintTemp] = useState<number>(1.2);
+  const [huemintLoading, setHuemintLoading] = useState<boolean>(false);
+  const [copiedHex, setCopiedHex] = useState<string | null>(null);
+
+  // Fontjoy Interactive Controls
+  const [lockedFonts, setLockedFonts] = useState({ heading: false, subhead: false, body: false });
+  const [fontContrast, setFontContrast] = useState<"high" | "balanced" | "similar">("high");
+
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const latestMsgRef = useRef<HTMLDivElement>(null);
 
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([
     {
@@ -114,10 +152,33 @@ export default function SessionPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, 150);
+      if (loading) {
+        latestMsgRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        latestMsgRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 120);
     return () => clearTimeout(timer);
-  }, [messages, showCards, loading, brandData, generatingDna, studioData, imageUrl]);
+  }, [messages.length, loading]);
+
+  // Google Font Link Injection
+  useEffect(() => {
+    if (!studioData?.typography) return;
+    const h = studioData.typography.heading.font;
+    const s = studioData.typography.subhead?.font || "Plus Jakarta Sans";
+    const b = studioData.typography.body.font;
+    const fontUrl = generateGoogleFontUrl(h, s, b);
+
+    const linkId = "dynamic-google-fonts";
+    let link = document.getElementById(linkId) as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement("link");
+      link.id = linkId;
+      link.rel = "stylesheet";
+      document.head.appendChild(link);
+    }
+    link.href = fontUrl;
+  }, [studioData?.typography]);
 
   const saveCurrentToHistory = (latestStudio: StudioData, activeMessages: { role: string; content: string }[]) => {
     if (!brandData || !selectedConcept) return;
@@ -163,12 +224,89 @@ export default function SessionPage() {
     });
   };
 
-  const handleSend = async (e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || loading || generatingDna || studioLoading) return;
+  // --- HUEMINT GENERATOR WORKBENCH ---
+  const rollHuemintColors = async () => {
+    if (!studioData || huemintLoading) return;
+    setHuemintLoading(true);
 
-    const userText = input.trim();
-    setInput("");
+    const currentHexes = studioData.colors.map(c => c.hex);
+    const newHexes = await fetchHuemintCustom(currentHexes, lockedColors, huemintTemp);
+
+    if (newHexes && newHexes.length === 4) {
+      const updatedColors = studioData.colors.map((c, i) => ({
+        ...c,
+        hex: lockedColors[i] ? c.hex : newHexes[i]
+      }));
+
+      const updatedStudio: StudioData = {
+        ...studioData,
+        colors: updatedColors
+      };
+
+      setStudioData(updatedStudio);
+      saveCurrentToHistory(updatedStudio, messages);
+    }
+    setHuemintLoading(false);
+  };
+
+  const toggleColorLock = (index: number) => {
+    setLockedColors(prev => {
+      const next = [...prev];
+      next[index] = !next[index];
+      return next;
+    });
+  };
+
+  const handleManualColorChange = (index: number, newHex: string) => {
+    if (!studioData) return;
+    const updatedColors = [...studioData.colors];
+    updatedColors[index] = { ...updatedColors[index], hex: newHex };
+
+    const updatedStudio = { ...studioData, colors: updatedColors };
+    setStudioData(updatedStudio);
+    saveCurrentToHistory(updatedStudio, messages);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedHex(text);
+    setTimeout(() => setCopiedHex(null), 1500);
+  };
+
+  // --- FONTJOY GENERATOR WORKBENCH ---
+  const rollFontjoyFonts = () => {
+    if (!studioData) return;
+
+    const currentSystem: FontjoySystem = {
+      heading: { font: studioData.typography.heading.font, style: studioData.typography.heading.style, category: "display" },
+      subhead: { font: studioData.typography.subhead?.font || "Plus Jakarta Sans", style: studioData.typography.subhead?.style || "Semi-bold", category: "sans" },
+      body: { font: studioData.typography.body.font, style: studioData.typography.body.style, category: "sans" }
+    };
+
+    const nextSystem = getFontjoyGeneration(currentSystem, lockedFonts, fontContrast);
+
+    const updatedStudio: StudioData = {
+      ...studioData,
+      typography: {
+        heading: { font: nextSystem.heading.font, style: nextSystem.heading.style },
+        subhead: { font: nextSystem.subhead.font, style: nextSystem.subhead.style },
+        body: { font: nextSystem.body.font, style: nextSystem.body.style }
+      }
+    };
+
+    setStudioData(updatedStudio);
+    saveCurrentToHistory(updatedStudio, messages);
+  };
+
+  const handleSend = async (
+    e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent,
+    customText?: string
+  ) => {
+    if (e) e.preventDefault();
+    const userText = (customText || input).trim();
+    if (!userText || loading || generatingDna || studioLoading) return;
+
+    if (!customText) setInput("");
 
     const updatedMessages = [...messages, { role: "user", content: userText }];
     setMessages(updatedMessages);
@@ -210,13 +348,15 @@ export default function SessionPage() {
 
       const data = await res.json();
       if (data.updatedStudio) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+
         setStudioData(data.updatedStudio);
         const finalMessages = [
           ...updatedMessages,
-          { role: "assistant", content: `${data.assistantReply} What additional changes or details would you like to explore?` }
+          { role: "assistant", content: `${data.assistantReply} What additional adjustments would you like to explore?` }
         ];
         setMessages(finalMessages);
-        triggerFluxRender(data.updatedStudio.heroPrompt, brandDesc, data.updatedStudio.colors);
+        triggerFluxRender(data.updatedStudio.heroPrompt, brandDesc, data.updatedStudio.colors, data.updatedStudio.typography?.heading?.font);
         saveCurrentToHistory(data.updatedStudio, finalMessages);
       }
     } catch (err) {
@@ -299,12 +439,12 @@ export default function SessionPage() {
       const data = await res.json();
       if (data.colors) {
         setStudioData(data);
-        triggerFluxRender(data.heroPrompt, brandDesc, data.colors);
+        triggerFluxRender(data.heroPrompt, brandDesc, data.colors, data.typography?.heading?.font);
         const finalMessages = [
           ...messages,
           { 
             role: "assistant", 
-            content: `The brand suite for Concept ${selectedConcept.toUpperCase()} is assembled. Review the live collateral billboard, color palette, and typography pairing below. Share your thoughts or request specific tweaks right here.` 
+            content: `The design system for Concept ${selectedConcept.toUpperCase()} is assembled. You can now use the Huemint-style palette workspace and Fontjoy typographic generator below.` 
           }
         ];
         setMessages(finalMessages);
@@ -317,30 +457,40 @@ export default function SessionPage() {
     }
   };
 
-  const triggerFluxRender = (promptText: string, subject: string, colorsList?: any[]) => {
+  const triggerFluxRender = async (promptText: string, subject: string, colorsList?: any[], headingFont?: string) => {
     setImageLoading(true);
-    const primaryColor = colorsList?.[2]?.name || "focal";
-    const baseColor = colorsList?.[0]?.name || "base";
+    const primaryColor = colorsList?.[2]?.name || "vibrant";
+    const baseColor = colorsList?.[0]?.name || "neutral";
 
-    const cleanPrompt = encodeURIComponent(
-      `commercial editorial product photograph of ${subject}, featuring ${primaryColor} and ${baseColor} materials, tactile textures, professional studio lighting, 8k resolution, photorealistic, centered composition, no text, no blur`
-    );
+    try {
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          brandName: subject,
+          primaryColor,
+          baseColor,
+          headingFont: headingFont || "modern typeface"
+        }),
+      });
 
-    const seed = Math.floor(Math.random() * 900000 + 100000);
-    const url = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1200&height=800&model=flux&seed=${seed}&nologo=true`;
+      const data = await res.json();
 
-    const img = new Image();
-    img.src = url;
-    img.onload = () => {
-      setImageUrl(url);
+      if (data.imageUrl) {
+        setImageUrl(data.imageUrl);
+      } else {
+        const seed = Math.floor(Math.random() * 900000 + 100000);
+        const encoded = encodeURIComponent(`Instagram feed post mockup for ${subject}, featuring ${primaryColor} packaging, Behance award winning branding design, 8k, photorealistic`);
+        setImageUrl(`https://image.pollinations.ai/prompt/${encoded}?width=1080&height=1080&model=flux&seed=${seed}&nologo=true`);
+      }
+    } catch (err) {
+      console.error("Image generation error:", err);
+    } finally {
       setImageLoading(false);
-    };
-    img.onerror = () => {
-      setImageLoading(false);
-    };
+    }
   };
 
-  // Safe contrast calculations for live billboard preview
   const canvasBg = studioData?.colors?.[1]?.hex || "#FFFFFF";
   const canvasText = getReadableTextColor(canvasBg);
   const heroBadgeBg = studioData?.colors?.[2]?.hex || "#B85D19";
@@ -348,9 +498,12 @@ export default function SessionPage() {
   const primaryBtnBg = studioData?.colors?.[0]?.hex || "#121212";
   const primaryBtnText = getReadableTextColor(primaryBtnBg);
 
+  const headingFontName = studioData?.typography?.heading?.font?.split('/')[0].trim() || 'serif';
+  const subheadFontName = studioData?.typography?.subhead?.font?.split('/')[0].trim() || 'sans-serif';
+  const bodyFontName = studioData?.typography?.body?.font?.split('/')[0].trim() || 'sans-serif';
+
   return (
     <div className="flex flex-col min-h-screen bg-[#F9F6F0] text-[#121212] selection:bg-[#B85D19] selection:text-white">
-      {/* Header */}
       <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 bg-[#F9F6F0]/85 backdrop-blur-md border-b border-[#E2DACD]">
         <Link href="/" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider hover:text-[#B85D19] transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -371,7 +524,6 @@ export default function SessionPage() {
         </button>
       </header>
 
-      {/* History Slide-out Drawer */}
       {historyOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex justify-start">
           <div className="w-full max-w-sm bg-[#F9F6F0] h-full shadow-2xl p-6 flex flex-col justify-between border-r border-[#E2DACD] animate-in slide-in-from-left duration-200">
@@ -424,47 +576,54 @@ export default function SessionPage() {
         </div>
       )}
 
-      {/* Main Stream */}
       <main className="flex-1 w-full max-w-4xl mx-auto p-6 pb-48 flex flex-col gap-6">
-        
-        {/* Chat Timeline */}
-        {messages.map((msg, index) => (
-          <div 
-            key={index} 
-            className={`flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300 ${
-              msg.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
-            {msg.role === "assistant" ? (
-              <div className="flex gap-4 max-w-[85%]">
-                <div className="w-8 h-8 rounded-full bg-[#121212] flex items-center justify-center shrink-0 mt-0.5 text-[#F9F6F0]">
-                  <Palette className="w-4 h-4 stroke-[1.75]" />
+        {messages.map((msg, index) => {
+          const isLast = index === messages.length - 1;
+          return (
+            <div 
+              key={index} 
+              ref={isLast ? latestMsgRef : null}
+              className={`flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+                msg.role === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              {msg.role === "assistant" ? (
+                <div className="flex gap-4 max-w-[85%]">
+                  <div className="w-8 h-8 rounded-full bg-[#121212] flex items-center justify-center shrink-0 mt-0.5 text-[#F9F6F0]">
+                    <Palette className="w-4 h-4 stroke-[1.75]" />
+                  </div>
+                  <div className="text-lg leading-relaxed font-serif text-[#121212]">
+                    {msg.content}
+                  </div>
                 </div>
-                <div className="text-lg leading-relaxed font-serif text-[#121212]">
-                  {msg.content}
+              ) : (
+                <div className="flex gap-4 max-w-[85%] flex-row-reverse">
+                  <div className="w-8 h-8 rounded-full bg-[#EFE9DF] border border-[#E2DACD] flex items-center justify-center shrink-0 mt-0.5">
+                    <User className="w-4 h-4 text-[#121212]" />
+                  </div>
+                  <div className="text-base leading-relaxed bg-[#121212] text-[#F9F6F0] px-6 py-3.5 rounded-3xl rounded-tr-sm font-light">
+                    {msg.content}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex gap-4 max-w-[85%] flex-row-reverse">
-                <div className="w-8 h-8 rounded-full bg-[#EFE9DF] border border-[#E2DACD] flex items-center justify-center shrink-0 mt-0.5">
-                  <User className="w-4 h-4 text-[#121212]" />
-                </div>
-                <div className="text-base leading-relaxed bg-[#121212] text-[#F9F6F0] px-6 py-3.5 rounded-3xl rounded-tr-sm font-light">
-                  {msg.content}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
 
         {loading && (
-          <div className="flex gap-3 items-center text-[#121212]/60 ml-2 text-xs uppercase tracking-widest font-semibold animate-pulse">
-            <Loader2 className="w-4 h-4 animate-spin text-[#B85D19]" />
-            Art Director is recalibrating your vision...
+          <div className="flex w-full justify-start animate-in fade-in duration-300">
+            <div className="flex gap-4 max-w-[85%] items-center">
+              <div className="w-8 h-8 rounded-full bg-[#121212] flex items-center justify-center shrink-0 text-[#F9F6F0]">
+                <Palette className="w-4 h-4 stroke-[1.75] animate-spin" />
+              </div>
+              <div className="flex items-center gap-2.5 bg-white border border-[#E2DACD] px-5 py-3 rounded-full text-xs font-medium text-[#121212]/70 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-[#B85D19] animate-ping" />
+                Art Director is synthesizing adjustments...
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Emotion Pills */}
         {showCards && (
           <div className="ml-12 grid grid-cols-2 sm:grid-cols-3 gap-3 animate-in fade-in duration-300">
             {EMOTIONS.map((emotion) => {
@@ -500,7 +659,6 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Concept Battler */}
         {brandData && !studioData && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="flex items-center gap-2">
@@ -549,11 +707,247 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Visual Studio Suite */}
+        {/* 1. HUEMINT INTERACTIVE COLOR WORKBENCH */}
         {studioData && (
           <div className="space-y-8 animate-in fade-in duration-500">
-            
-            {/* High-Contrast Dynamic Collateral Billboard */}
+            <div className="bg-white rounded-3xl border border-[#E2DACD] shadow-sm overflow-hidden flex flex-col">
+              
+              {/* Huemint Header Controls */}
+              <div className="p-6 border-b border-[#E2DACD] flex flex-wrap items-center justify-between gap-4 bg-[#FAF8F5]">
+                <div className="flex items-center gap-2">
+                  <Palette className="w-4 h-4 text-[#B85D19]" />
+                  <h3 className="font-serif text-xl font-medium">Color System </h3>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  {/* Temperature / Creativity Slider */}
+                  <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-full border border-[#E2DACD] shadow-xs">
+                    <Sliders className="w-3.5 h-3.5 text-[#B85D19]" />
+                    <span className="text-[11px] font-semibold text-[#121212]/70">Creativity:</span>
+                    <input
+                      type="range"
+                      min="0.4"
+                      max="2.4"
+                      step="0.1"
+                      value={huemintTemp}
+                      onChange={(e) => setHuemintTemp(parseFloat(e.target.value))}
+                      className="w-20 accent-[#B85D19] cursor-pointer"
+                    />
+                    <span className="text-[10px] font-mono text-[#121212]/50">{huemintTemp}</span>
+                  </div>
+
+                  {/* Generate / Roll Button */}
+                  <button
+                    onClick={rollHuemintColors}
+                    disabled={huemintLoading}
+                    className="flex items-center gap-2 bg-[#121212] text-white px-5 py-2 rounded-full text-xs uppercase tracking-wider font-semibold hover:bg-[#B85D19] transition-all shadow-sm"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${huemintLoading ? 'animate-spin' : ''}`} />
+                    Generate
+                  </button>
+                </div>
+              </div>
+
+              {/* Huemint Swatch Columns */}
+              <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[#E2DACD]">
+                {studioData.colors.map((c, i) => {
+                  const isLocked = lockedColors[i];
+                  const textColor = getReadableTextColor(c.hex);
+
+                  return (
+                    <div 
+                      key={i} 
+                      className="h-64 p-6 flex flex-col justify-between transition-all duration-300 relative group"
+                      style={{ backgroundColor: c.hex, color: textColor }}
+                    >
+                      {/* Top Action Bar (Lock / Color Picker) */}
+                      <div className="flex items-center justify-between z-10">
+                        <button
+                          onClick={() => toggleColorLock(i)}
+                          className={`p-2 rounded-full backdrop-blur-md transition-all shadow-xs ${
+                            isLocked 
+                              ? "bg-white text-[#121212]" 
+                              : "bg-black/20 text-white/90 hover:bg-black/40"
+                          }`}
+                          title={isLocked ? "Unlock color" : "Lock color"}
+                        >
+                          {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                        </button>
+
+                        <div className="relative overflow-hidden w-7 h-7 rounded-full border border-white/20 shadow-xs cursor-pointer">
+                          <input
+                            type="color"
+                            value={c.hex}
+                            onChange={(e) => handleManualColorChange(i, e.target.value)}
+                            className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer opacity-0"
+                            title="Pick custom hex"
+                          />
+                          <div className="w-full h-full rounded-full" style={{ backgroundColor: c.hex }} />
+                        </div>
+                      </div>
+
+                      {/* Swatch Details */}
+                      <div className="space-y-1 z-10">
+                        <span className="text-[10px] uppercase font-bold tracking-widest opacity-75 block">
+                          {c.role}
+                        </span>
+                        <h4 className="text-lg font-bold tracking-tight line-clamp-1">
+                          {c.name}
+                        </h4>
+                        
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <button
+                            onClick={() => copyToClipboard(c.hex)}
+                            className="flex items-center gap-1 text-xs font-mono font-bold px-2 py-1 rounded-md bg-black/15 hover:bg-black/30 backdrop-blur-xs transition-colors"
+                          >
+                            <Copy className="w-3 h-3" />
+                            {copiedHex === c.hex ? "COPIED" : c.hex.toUpperCase()}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+            </div>
+
+            {/* 2. FONTJOY INTERACTIVE TYPOGRAPHY WORKBENCH */}
+            <div className="bg-white rounded-3xl border border-[#E2DACD] shadow-sm p-6 md:p-8 space-y-6">
+              
+              {/* Fontjoy Header & Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#E2DACD]">
+                <div className="flex items-center gap-2">
+                  <Type className="w-4 h-4 text-[#B85D19]" />
+                  <h3 className="font-serif text-xl font-medium">Typography Tips</h3>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  {/* Contrast Mode Selector */}
+                  <div className="flex items-center bg-[#FAF8F5] p-1 rounded-full border border-[#E2DACD]">
+                    {(["high", "balanced", "similar"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setFontContrast(mode)}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold capitalize transition-all ${
+                          fontContrast === mode
+                            ? "bg-[#121212] text-white shadow-xs"
+                            : "text-[#121212]/60 hover:text-[#121212]"
+                        }`}
+                      >
+                        {mode} Contrast
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Generate / Roll Pairing */}
+                  <button
+                    onClick={rollFontjoyFonts}
+                    className="flex items-center gap-2 bg-[#121212] text-white px-5 py-2 rounded-full text-xs uppercase tracking-wider font-semibold hover:bg-[#B85D19] transition-all shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Generate
+                  </button>
+                </div>
+              </div>
+
+              {/* Fontjoy 3-Tier Layer View */}
+              <div className="space-y-6">
+                
+                {/* 1. Header Level */}
+                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#FAF8F5]/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1 max-w-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Heading</span>
+                      <span className="text-xs font-mono text-[#121212]/50">{headingFontName}</span>
+                    </div>
+                    <h2 
+                      className="text-3xl md:text-4xl font-extrabold tracking-tight"
+                      style={{ fontFamily: `'${headingFontName}', serif` }}
+                    >
+                      Form Follows Expression
+                    </h2>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start md:self-center">
+                    <button
+                      onClick={() => setLockedFonts(prev => ({ ...prev, heading: !prev.heading }))}
+                      className={`p-2.5 rounded-full border transition-all ${
+                        lockedFonts.heading 
+                          ? "bg-[#121212] text-white border-[#121212]" 
+                          : "bg-white text-[#121212]/60 border-[#E2DACD] hover:border-[#121212]"
+                      }`}
+                      title={lockedFonts.heading ? "Unlock Heading" : "Lock Heading"}
+                    >
+                      {lockedFonts.heading ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Subheader Level */}
+                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#FAF8F5]/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1 max-w-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Subheader</span>
+                      <span className="text-xs font-mono text-[#121212]/50">{subheadFontName}</span>
+                    </div>
+                    <h3 
+                      className="text-xl md:text-2xl font-medium opacity-90"
+                      style={{ fontFamily: `'${subheadFontName}', sans-serif` }}
+                    >
+                      Crafted visual systems that honor rhythm and hierarchy.
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start md:self-center">
+                    <button
+                      onClick={() => setLockedFonts(prev => ({ ...prev, subhead: !prev.subhead }))}
+                      className={`p-2.5 rounded-full border transition-all ${
+                        lockedFonts.subhead 
+                          ? "bg-[#121212] text-white border-[#121212]" 
+                          : "bg-white text-[#121212]/60 border-[#E2DACD] hover:border-[#121212]"
+                      }`}
+                      title={lockedFonts.subhead ? "Unlock Subheader" : "Lock Subheader"}
+                    >
+                      {lockedFonts.subhead ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Body Level */}
+                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#FAF8F5]/60 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1 max-w-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Body</span>
+                      <span className="text-xs font-mono text-[#121212]/50">{bodyFontName}</span>
+                    </div>
+                    <p 
+                      className="text-sm md:text-base leading-relaxed opacity-80"
+                      style={{ fontFamily: `'${bodyFontName}', sans-serif` }}
+                    >
+                      Typeface pairings are projected across deep vector embeddings to evaluate structural tension, aperture width, and optical balance across editorial and interface surfaces.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start md:self-center">
+                    <button
+                      onClick={() => setLockedFonts(prev => ({ ...prev, body: !prev.body }))}
+                      className={`p-2.5 rounded-full border transition-all ${
+                        lockedFonts.body 
+                          ? "bg-[#121212] text-white border-[#121212]" 
+                          : "bg-white text-[#121212]/60 border-[#E2DACD] hover:border-[#121212]"
+                      }`}
+                      title={lockedFonts.body ? "Unlock Body" : "Lock Body"}
+                    >
+                      {lockedFonts.body ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* 3. LIVE MOCKUP PROOF */}
             <div 
               className="rounded-3xl p-8 border-2 shadow-xl relative overflow-hidden transition-all duration-500 flex flex-col justify-between min-h-[380px]"
               style={{ 
@@ -574,17 +968,23 @@ export default function SessionPage() {
                     Live Mockup Proof
                   </span>
                   <span className="text-xs font-mono uppercase font-semibold opacity-75">
-                    {studioData.typography?.heading?.font}
+                    {headingFontName}
                   </span>
                 </div>
                 <span className="text-xs font-bold tracking-wider uppercase opacity-60">Identity System</span>
               </div>
 
               <div className="my-8 space-y-4">
-                <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight leading-none capitalize">
+                <h1 
+                  className="text-4xl md:text-6xl font-extrabold tracking-tight leading-none capitalize"
+                  style={{ fontFamily: `'${headingFontName}', serif` }}
+                >
                   {brandDesc}
                 </h1>
-                <p className="text-base md:text-lg max-w-2xl font-medium leading-relaxed opacity-90">
+                <p 
+                  className="text-base md:text-lg max-w-2xl font-medium leading-relaxed opacity-90"
+                  style={{ fontFamily: `'${bodyFontName}', sans-serif` }}
+                >
                   {studioData.creativeBrief?.coreThesis || "A distinctive visual identity built on deliberate hierarchy and craft."}
                 </p>
               </div>
@@ -611,78 +1011,54 @@ export default function SessionPage() {
               </div>
             </div>
 
-            {/* Lookbook & Color System */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Photo */}
-              <div className="bg-white p-5 rounded-3xl border border-[#E2DACD] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 text-[#B85D19]">
-                    <ImageIcon className="w-3.5 h-3.5" /> Lookbook Visual
-                  </span>
-                  <button 
-                    onClick={() => triggerFluxRender(studioData.heroPrompt, brandDesc, studioData.colors)}
-                    className="p-1 hover:bg-[#EFE9DF] rounded-full"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${imageLoading ? 'animate-spin' : ''}`} />
-                  </button>
+            {/* 4. INSTAGRAM SOCIAL CAMPAIGN POST MOCKUP */}
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <InstagramIcon className="w-4 h-4 text-[#B85D19]" />
+                  <h3 className="font-serif text-xl font-medium">Instagram Brand Campaign Post</h3>
                 </div>
-                {imageLoading ? (
-                  <div className="h-64 rounded-2xl bg-[#F9F6F0] flex flex-col items-center justify-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-[#B85D19]" />
-                    <span className="text-xs text-[#121212]/50">Synthesizing photographic lookbook...</span>
-                  </div>
-                ) : imageUrl ? (
-                  <img src={imageUrl} alt="Lookbook" className="w-full h-64 object-cover rounded-2xl shadow-sm" />
-                ) : null}
+                <button 
+                  onClick={() => triggerFluxRender(studioData.heroPrompt, brandDesc, studioData.colors, studioData.typography?.heading?.font)}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 border border-[#E2DACD] rounded-full hover:bg-[#F9F6F0] transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${imageLoading ? 'animate-spin' : ''}`} />
+                  Re-render Post
+                </button>
               </div>
 
-              {/* Color Palette */}
-              <div className="bg-white p-5 rounded-3xl border border-[#E2DACD] flex flex-col justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#B85D19] mb-3 block">
-                  Curated Color Palette
-                </span>
-                <div className="grid grid-cols-2 gap-3 flex-1">
-                  {studioData.colors.map((c, i) => (
-                    <div key={i} className="p-3 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/40 flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl shadow-inner border border-black/10 shrink-0" style={{ backgroundColor: c.hex }} />
-                      <div className="overflow-hidden">
-                        <span className="text-xs font-bold block truncate text-[#121212]">{c.name}</span>
-                        <code className="text-[11px] text-[#121212]/70 font-mono font-semibold block">{c.hex}</code>
-                      </div>
+              <div className="flex justify-center py-2">
+                <div className="w-full max-w-md bg-[#FAF8F5] border border-[#E2DACD] rounded-3xl p-4 shadow-lg flex flex-col gap-3">
+                  <div className="flex items-center gap-2.5 pb-2 border-b border-[#E2DACD]/60">
+                    <div className="w-7 h-7 rounded-full bg-[#121212] flex items-center justify-center text-white text-[10px] font-bold uppercase">
+                      {brandDesc.slice(0, 2)}
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div>
+                      <span className="text-xs font-bold block leading-tight">{brandDesc.toLowerCase().replace(/\s+/g, '_')}</span>
+                      <span className="text-[10px] text-[#121212]/50 block leading-tight">Sponsored Brand Edition</span>
+                    </div>
+                  </div>
 
-            </div>
+                  {imageLoading ? (
+                    <div className="aspect-square w-full rounded-2xl bg-[#EFE9DF] flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-8 h-8 animate-spin text-[#B85D19]" />
+                      <span className="text-xs text-[#121212]/60 font-medium">Synthesizing Instagram campaign mockup...</span>
+                    </div>
+                  ) : imageUrl ? (
+                    <img 
+                      src={imageUrl} 
+                      alt="Instagram Campaign Mockup" 
+                      className="aspect-square w-full object-cover rounded-2xl shadow-inner border border-black/5" 
+                    />
+                  ) : null}
 
-            {/* Typography Scale */}
-            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] space-y-4">
-              <div className="flex items-center gap-2">
-                <Type className="w-4 h-4 text-[#B85D19]" />
-                <h3 className="font-serif text-xl font-medium">Typographic Scale & Pairings</h3>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/60 space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Display & Title Hierarchy</span>
-                  <h4 className="text-2xl font-serif font-bold pt-1 text-[#121212]">
-                    {studioData.typography?.heading?.font || "Cabinet Grotesk"}
-                  </h4>
-                  <p className="text-xs text-[#121212]/80 font-medium">
-                    {studioData.typography?.heading?.style || "Tight tracking, optical kerning, bold impact"}
-                  </p>
-                </div>
-
-                <div className="p-5 rounded-2xl border border-[#E2DACD] bg-[#F9F6F0]/60 space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#B85D19]">Interface & Body</span>
-                  <h4 className="text-xl font-sans font-semibold pt-1 text-[#121212]">
-                    {studioData.typography?.body?.font || "General Sans"}
-                  </h4>
-                  <p className="text-xs text-[#121212]/80 font-medium">
-                    {studioData.typography?.body?.style || "Neutral geometric clarity, comfortable line height"}
-                  </p>
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-xs leading-relaxed text-[#121212]">
+                      <span className="font-bold mr-1.5">{brandDesc.toLowerCase().replace(/\s+/g, '_')}</span>
+                      {studioData.creativeBrief?.coreThesis}
+                    </p>
+                    <span className="text-[10px] text-[#B85D19] font-semibold block">#brandidentity #{brandDesc.toLowerCase().replace(/\s+/g, '')} #editorialdesign</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -693,7 +1069,6 @@ export default function SessionPage() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* Input Bar */}
       <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[#F9F6F0] via-[#F9F6F0] to-transparent pt-6 pb-6 px-6 z-20">
         <div className="max-w-3xl mx-auto relative">
           <div className="relative flex items-center">
@@ -705,7 +1080,7 @@ export default function SessionPage() {
               disabled={showCards || loading || generatingDna || studioLoading}
               placeholder={
                 studioData 
-                  ? "Critique or refine (e.g. 'Shift palette to darker earth tones and make the display font more geometric')..." 
+                  ? "Critique or refine (e.g. 'Make the palette more muted and switch to an architectural display serif')..." 
                   : showCards 
                   ? "Select aesthetic pillars above..." 
                   : "Describe any brand, product, or event..."
@@ -714,7 +1089,7 @@ export default function SessionPage() {
             />
             <button 
               type="button"
-              onClick={handleSend}
+              onClick={(e) => handleSend(e)}
               disabled={!input.trim() || showCards || loading || generatingDna || studioLoading}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-[#121212] text-[#F9F6F0] rounded-full flex items-center justify-center hover:bg-[#B85D19] disabled:opacity-50 transition-all duration-200"
             >

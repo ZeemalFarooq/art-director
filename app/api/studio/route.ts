@@ -1,53 +1,56 @@
 import { groq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
+import { fetchHuemintPalette } from '@/lib/huemint';
+import { getCuratedFontPairing } from '@/lib/fontEngine';
 
 export async function POST(req: Request) {
   try {
     const { brandDescription, selectedConcept, personality } = await req.json();
 
+    // 1. Generate deep-learning palette via Huemint API
+    const huemintHexes = await fetchHuemintPalette(1.4);
+
+    // 2. Derive typographic vector anchors from Fontjoy engine
+    const initialPairing = getCuratedFontPairing(personality || selectedConcept?.style);
+
     const prompt = `
-You are a world-class Art Director and Creative Technologist.
-Analyze this brand/product: "${brandDescription}"
-Concept Trajectory: "${selectedConcept?.title || 'Bespoke'}" (${selectedConcept?.style || 'Editorial'})
-Archetype: "${personality || 'Dynamic'}"
+Project Subject: "${brandDescription}"
+Concept Direction: "${selectedConcept?.title || 'Bespoke'}" (${selectedConcept?.style || 'Contemporary'})
+Brand Personality: "${personality || 'Dynamic'}"
+${huemintHexes ? `AI Generated Hex Spectrum: ${JSON.stringify(huemintHexes)}` : ''}
+Font Anchors: Heading "${initialPairing.heading.font}", Body "${initialPairing.body.font}"
 
-Your objective: Engineer an uncompromising visual design kit specifically for "${brandDescription}".
-DO NOT rely on generic defaults or presets. Derive colors, typography, and visuals organically from the physical materials, cultural cues, and industry standards of this exact subject.
+You are an elite Type & Art Director.
+Generate a cohesive visual design kit strictly customized to "${brandDescription}".
+1. Color System: Map the hexes (or generate 4 distinct hexes) into functional roles (Dominant Base, Secondary Neutral, Primary Accent, Supporting Accent) with expressive names and usage details.
+2. Typography: Curate authentic display headline and readable body Google Fonts matching the concept.
+3. Hero Prompt: Write a 25-word commercial product/lookbook photography prompt focusing on tangible objects from "${brandDescription}". Avoid empty spaces or abstract canvases.
 
-Rules:
-1. Palette Requirements:
-   - "Dominant Base": Must be a high-contrast foundation (#080808 to #242424 for dark palettes, or deep ink/slate).
-   - "Secondary Neutral": Must provide clean negative space (#FFFFFF, #F8F7F4, or deep matte tint if dark-mode).
-   - "Primary Accent": The unmistakable hero color signature (e.g. vibrant citrus for beverage, brushed bronze for architecture, neon cyan for gaming).
-   - "Supporting Accent": A harmonious bridge tone for borders, micro-tags, and secondary highlights.
-2. Typography: Pair genuine, distinct typefaces fitting the industry (e.g., razor-sharp grotesque for tech, high-contrast serif for luxury/editorial, friendly rounded sans for modern consumer goods).
-3. Hero Prompt: A concrete, 25-word photorealistic commercial product/scene photograph showcasing real items native to "${brandDescription}". Focus on tangible textures, professional studio lighting, and high-end staging.
-
-Output strictly valid JSON (no markdown wrappers):
+Output ONLY valid raw JSON with this exact schema (no markdown fences):
 {
   "colors": [
-    { "role": "Dominant Base", "hex": "#HEX", "name": "Creative Name", "usage": "Specific brand application" },
-    { "role": "Secondary Neutral", "hex": "#HEX", "name": "Creative Name", "usage": "Specific brand application" },
-    { "role": "Primary Accent", "hex": "#HEX", "name": "Creative Name", "usage": "Specific brand application" },
-    { "role": "Supporting Accent", "hex": "#HEX", "name": "Creative Name", "usage": "Specific brand application" }
+    { "role": "Dominant Base", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+    { "role": "Secondary Neutral", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+    { "role": "Primary Accent", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+    { "role": "Supporting Accent", "hex": "#HEX", "name": "Name", "usage": "Specific application" }
   ],
   "typography": {
-    "heading": { "font": "Typeface Name", "style": "Weight, tracking, and optical presence" },
-    "body": { "font": "Typeface Name", "style": "Weight, aperture, and legibility notes" }
+    "heading": { "font": "${initialPairing.heading.font}", "style": "${initialPairing.heading.style}" },
+    "body": { "font": "${initialPairing.body.font}", "style": "${initialPairing.body.style}" }
   },
-  "heroPrompt": "commercial editorial product photograph of [tangible subject from ${brandDescription}], professional lighting, 8k resolution, photorealistic",
+  "heroPrompt": "commercial editorial product photograph of [tangible subject from ${brandDescription}], styled in ${selectedConcept?.style}, studio lighting, 8k resolution, photorealistic",
   "creativeBrief": {
-    "coreThesis": "1 concise sentence defining brand positioning",
-    "doList": ["Design rule 1", "Design rule 2", "Design rule 3"],
-    "dontList": ["Industry visual cliché to avoid 1", "Cliché 2", "Cliché 3"]
+    "coreThesis": "Strategic brand thesis statement",
+    "doList": ["Direct guideline 1", "Direct guideline 2", "Direct guideline 3"],
+    "dontList": ["Avoid rule 1", "Avoid rule 2", "Avoid rule 3"]
   }
 }
 `;
 
     const { text } = await generateText({
       model: groq('openai/gpt-oss-120b'),
-      temperature: 0.8,
+      temperature: 0.6,
       prompt,
     });
 

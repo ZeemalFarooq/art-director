@@ -1,10 +1,19 @@
 import { groq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
+import { fetchHuemintPalette } from '@/lib/huemint';
 
 export async function POST(req: Request) {
   try {
     const { userFeedback, brandDescription, currentStudioData, currentConcept } = await req.json();
+
+    // Check if critique touches color
+    const isColorFeedback = /color|palette|shade|warm|cold|dark|bright|pastel|hue/i.test(userFeedback);
+    let freshHuemintHexes: string[] | null = null;
+
+    if (isColorFeedback) {
+      freshHuemintHexes = await fetchHuemintPalette(1.5);
+    }
 
     const prompt = `
 You are an expert Creative Director iterating directly on client feedback.
@@ -12,27 +21,28 @@ Project: "${brandDescription}"
 Current Direction: "${currentConcept?.title}" (${currentConcept?.style})
 Active Colors: ${JSON.stringify(currentStudioData?.colors || [])}
 Active Typography: ${JSON.stringify(currentStudioData?.typography || {})}
+${freshHuemintHexes ? `Fresh AI Color Spectrum: ${JSON.stringify(freshHuemintHexes)}` : ''}
 
-Client's Requested Adjustment:
+Client's Critique:
 "${userFeedback}"
 
 Task:
-1. Write a direct, peer-to-peer 1-2 sentence response explaining exactly what you changed based on their note.
-2. Re-synthesize the color palette, typography pairing, and image prompt to reflect the critique, while ensuring visual harmony and clear text contrast.
+1. Explain in 1-2 sentences how you adjusted the design system to satisfy their feedback.
+2. Provide updated colors, typography pairings, and image prompts reflecting the adjustments.
 
 Output strictly valid JSON (no markdown wrappers):
 {
-  "assistantReply": "<Your direct 1-2 sentence explanation of adjustments made>",
+  "assistantReply": "<Your direct 1-2 sentence response explaining updates>",
   "updatedStudio": {
     "colors": [
-      { "role": "Dominant Base", "hex": "#HEX", "name": "Creative Name", "usage": "Usage detail" },
-      { "role": "Secondary Neutral", "hex": "#HEX", "name": "Creative Name", "usage": "Usage detail" },
-      { "role": "Primary Accent", "hex": "#HEX", "name": "Creative Name", "usage": "Usage detail" },
-      { "role": "Supporting Accent", "hex": "#HEX", "name": "Creative Name", "usage": "Usage detail" }
+      { "role": "Dominant Base", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+      { "role": "Secondary Neutral", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+      { "role": "Primary Accent", "hex": "#HEX", "name": "Name", "usage": "Specific application" },
+      { "role": "Supporting Accent", "hex": "#HEX", "name": "Name", "usage": "Specific application" }
     ],
     "typography": {
-      "heading": { "font": "Typeface Name", "style": "Styling description" },
-      "body": { "font": "Typeface Name", "style": "Styling description" }
+      "heading": { "font": "Specific Typeface", "style": "Weight & tracking notes" },
+      "body": { "font": "Specific Typeface", "style": "Weight & line-height notes" }
     },
     "heroPrompt": "commercial editorial product photograph of [refined subject], professional lighting, 8k resolution, photorealistic",
     "creativeBrief": {
@@ -46,7 +56,7 @@ Output strictly valid JSON (no markdown wrappers):
 
     const { text } = await generateText({
       model: groq('openai/gpt-oss-120b'),
-      temperature: 0.7,
+      temperature: 0.6,
       prompt,
     });
 
