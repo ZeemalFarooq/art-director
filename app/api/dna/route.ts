@@ -1,4 +1,4 @@
-import { groq } from '@ai-sdk/groq';
+﻿import { groq } from '@ai-sdk/groq';
 import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
 
@@ -27,7 +27,7 @@ Analyze this brand and output a valid JSON object strictly matching this schema 
   },
   "personality": "Playful Minimalist",
   "keywords": ["Durable", "Tactile", "Honest", "Approachable"],
-  "avoid": ["Pastel Clichés", "Overly Delicate", "Corporate Rigidity"],
+  "avoid": ["Pastel Cliches", "Overly Delicate", "Corporate Rigidity"],
   "concepts": [
     {
       "id": "a",

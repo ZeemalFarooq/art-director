@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useEffect } from "react";
 import { 
@@ -532,8 +532,15 @@ export default function SessionPage() {
   const activeConcept = brandData?.concepts.find(c => c.id === selectedConcept);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#F9F6F0] text-[#121212] selection:bg-[#B85D19] selection:text-white">
-      <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 bg-[#F9F6F0]/85 backdrop-blur-md border-b border-[#E2DACD]">
+    <div className="session-shell flex flex-col min-h-screen text-[#121212] selection:bg-[#315EF6] selection:text-white">
+      <div className="session-doodle session-doodle-orbit" aria-hidden="true">
+        <span />
+      </div>
+      <div className="session-doodle session-doodle-spark" aria-hidden="true">
+        <span />
+      </div>
+
+      <header className="relative z-10 sticky top-0 flex items-center justify-between px-6 py-4 bg-[#F4F7FB]/85 backdrop-blur-md border-b border-[#D8E2EE]">
         <Link href="/" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider hover:text-[#B85D19] transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
           Exit Studio
@@ -605,7 +612,7 @@ export default function SessionPage() {
         </div>
       )}
 
-      <main className="flex-1 w-full max-w-4xl mx-auto p-6 pb-48 flex flex-col gap-6">
+      <main className="relative z-10 flex-1 w-full max-w-4xl mx-auto p-6 pb-48 flex flex-col gap-6">
         {messages.map((msg, index) => {
           const isLast = index === messages.length - 1;
           return (
@@ -729,7 +736,7 @@ export default function SessionPage() {
                   disabled={studioLoading}
                   className="bg-[#B85D19] text-white px-8 py-3.5 rounded-full text-xs uppercase tracking-widest font-semibold hover:bg-[#964a12] transition-all flex items-center gap-2"
                 >
-                  {studioLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Build Visual Identity Studio →"}
+                  {studioLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Build Visual Identity Studio ->"}
                 </button>
               </div>
             )}
