@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { 
   Palette, User, ArrowLeft, Check, Loader2, 
   Swords, Type, History, X, 
-  RefreshCw, Trash2, Send, Bookmark, Lock, Unlock, Sliders, Copy
+  RefreshCw, Trash2, Send, Bookmark, Lock, Unlock, Sliders, Copy,
+  Lightbulb, Megaphone, MessageCircle, CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
 import { 
@@ -13,7 +14,6 @@ import {
   FontjoySystem,
 } from "@/lib/fontEngine";
 import { fetchHuemintCustom } from "@/lib/huemint";
-import Image from "next/image";
 
 function InstagramIcon({ className = "w-4 h-4 text-[#B85D19]" }: { className?: string }) {
   return (
@@ -89,6 +89,12 @@ interface SavedSession {
   messages: { role: string; content: string }[];
 }
 
+const campaignFormats = [
+  { label: "The ritual", channel: "Short film + social sequence", description: "Show the repeated human moment that makes the brand feel necessary." },
+  { label: "The signal", channel: "OOH + launch landing page", description: "Turn one recognizable visual code into a public-facing brand flag." },
+  { label: "The proof", channel: "Carousel + case study", description: "Make the craft, ingredients, process, or transformation impossible to miss." },
+];
+
 function getReadableTextColor(bgHex: string) {
   const cleanHex = bgHex.replace('#', '');
   const r = parseInt(cleanHex.substring(0, 2) || "255", 16);
@@ -125,6 +131,7 @@ export default function SessionPage() {
   const [imageLoading, setImageLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [copiedToolkitItem, setCopiedToolkitItem] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const latestMsgRef = useRef<HTMLDivElement>(null);
@@ -208,9 +215,7 @@ export default function SessionPage() {
     setSelectedConcept(s.selectedConcept);
     setStudioData(s.studioData);
     setImageUrl(s.imageUrl || null);
-    if (s.messages && s.messages.length > 0) {
-      setMessages(s.messages);
-    }
+    if (s.messages && s.messages.length > 0) setMessages(s.messages);
     setHistoryOpen(false);
   };
 
@@ -223,25 +228,16 @@ export default function SessionPage() {
     });
   };
 
-  // --- HUEMINT GENERATOR WORKBENCH ---
   const rollHuemintColors = async () => {
     if (!studioData || huemintLoading) return;
     setHuemintLoading(true);
-
     const currentHexes = studioData.colors.map(c => c.hex);
     const newHexes = await fetchHuemintCustom(currentHexes, lockedColors, huemintTemp);
-
     if (newHexes && newHexes.length === 4) {
-      const updatedColors = studioData.colors.map((c, i) => ({
-        ...c,
-        hex: lockedColors[i] ? c.hex : newHexes[i]
-      }));
-
       const updatedStudio: StudioData = {
         ...studioData,
-        colors: updatedColors
+        colors: studioData.colors.map((c, i) => ({ ...c, hex: lockedColors[i] ? c.hex : newHexes[i] }))
       };
-
       setStudioData(updatedStudio);
       saveCurrentToHistory(updatedStudio, messages);
     }
@@ -260,7 +256,6 @@ export default function SessionPage() {
     if (!studioData) return;
     const updatedColors = [...studioData.colors];
     updatedColors[index] = { ...updatedColors[index], hex: newHex };
-
     const updatedStudio = { ...studioData, colors: updatedColors };
     setStudioData(updatedStudio);
     saveCurrentToHistory(updatedStudio, messages);
@@ -272,18 +267,20 @@ export default function SessionPage() {
     setTimeout(() => setCopiedHex(null), 1500);
   };
 
-  // --- FONTJOY GENERATOR WORKBENCH ---
+  const copyToolkitItem = (label: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedToolkitItem(label);
+    setTimeout(() => setCopiedToolkitItem(null), 1500);
+  };
+
   const rollFontjoyFonts = () => {
     if (!studioData) return;
-
     const currentSystem: FontjoySystem = {
       heading: { font: studioData.typography.heading.font, style: studioData.typography.heading.style, category: "display" },
       subhead: { font: studioData.typography.subhead?.font || "Plus Jakarta Sans", style: studioData.typography.subhead?.style || "Semi-bold", category: "sans" },
       body: { font: studioData.typography.body.font, style: studioData.typography.body.style, category: "sans" }
     };
-
     const nextSystem = getFontjoyGeneration(currentSystem, lockedFonts, fontContrast);
-
     const updatedStudio: StudioData = {
       ...studioData,
       typography: {
@@ -292,7 +289,6 @@ export default function SessionPage() {
         body: { font: nextSystem.body.font, style: nextSystem.body.style }
       }
     };
-
     setStudioData(updatedStudio);
     saveCurrentToHistory(updatedStudio, messages);
   };
@@ -358,14 +354,6 @@ export default function SessionPage() {
           { role: "assistant", content: `${data.assistantReply} What additional adjustments would you like to explore?` }
         ];
         setMessages(finalMessages);
-        triggerFluxRender(
-          data.updatedStudio.heroPrompt,
-          brandDesc,
-          data.updatedStudio.colors,
-          data.updatedStudio.typography?.heading?.font,
-          data.updatedStudio.typography?.body?.font,
-          activeConcept?.style
-        );
         saveCurrentToHistory(data.updatedStudio, finalMessages);
       }
     } catch (err) {
@@ -451,14 +439,6 @@ export default function SessionPage() {
       const data = await res.json();
       if (data.colors) {
         setStudioData(data);
-        triggerFluxRender(
-          data.heroPrompt,
-          brandDesc,
-          data.colors,
-          data.typography?.heading?.font,
-          data.typography?.body?.font,
-          conceptObj.style
-        );
         const finalMessages = [
           ...messages,
           { 
@@ -473,49 +453,6 @@ export default function SessionPage() {
       console.error(err);
     } finally {
       setStudioLoading(false);
-    }
-  };
-
-  const triggerFluxRender = async (
-    promptText: string,
-    subject: string,
-    colorsList?: StudioData["colors"],
-    headingFont?: string,
-    bodyFont?: string,
-    conceptStyle?: string
-  ) => {
-    setImageLoading(true);
-    const primaryColor = colorsList?.[2]?.name || "vibrant";
-    const baseColor = colorsList?.[0]?.name || "neutral";
-
-    try {
-      const res = await fetch("/api/image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptText,
-          brandName: subject,
-          primaryColor,
-          baseColor,
-          headingFont: headingFont || "modern typeface",
-          bodyFont: bodyFont || "clean sans serif",
-          conceptStyle: conceptStyle || "editorial brand direction"
-        }),
-      });
-
-      const data = await res.json();
-
-      if (data.imageUrl) {
-        setImageUrl(data.imageUrl);
-      } else {
-        const seed = Math.floor(Math.random() * 900000 + 100000);
-        const encoded = encodeURIComponent(`Instagram feed post mockup for ${subject}, featuring ${primaryColor} packaging, Behance award winning branding design, 8k, photorealistic`);
-        setImageUrl(`https://image.pollinations.ai/prompt/${encoded}?width=1080&height=1080&model=flux&seed=${seed}&nologo=true`);
-      }
-    } catch (err) {
-      console.error("Image generation error:", err);
-    } finally {
-      setImageLoading(false);
     }
   };
 
@@ -1047,121 +984,94 @@ export default function SessionPage() {
               </div>
             </div>
 
-            {/* 4. MOOD BOARD */}
-            <div className="bg-[#121212] text-[#F9F6F0] rounded-3xl p-6 md:p-8 shadow-xl space-y-6 overflow-hidden relative">
-              <div className="flex flex-wrap items-end justify-between gap-3 relative z-10">
+            {/* 4. DIRECTION TOOLKIT */}
+            <div className="bg-[#111b42] text-white rounded-3xl p-6 md:p-8 shadow-xl space-y-7 overflow-hidden relative">
+              <div className="absolute -right-16 -top-16 w-48 h-48 rounded-full border border-[#8da8ff]/25" aria-hidden="true" />
+              <div className="absolute right-5 top-5 w-3 h-3 rounded-full bg-[#8da8ff] shadow-[0_0_0_7px_rgba(141,168,255,0.12)]" aria-hidden="true" />
+              <div className="relative z-10 flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-[#D4874B] font-bold">Visual reference field</span>
-                  <h3 className="font-serif text-2xl md:text-3xl font-medium mt-1">Mood board</h3>
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-[#9fb7ff] font-bold">Designer field notes</span>
+                  <h3 className="font-serif text-2xl md:text-3xl font-medium mt-1">Direction toolkit</h3>
                 </div>
-                <span className="text-xs text-white/50 uppercase tracking-wider">{activeConcept?.style || "Art direction"}</span>
+                <span className="text-xs text-white/55 uppercase tracking-wider">{activeConcept?.style || "Art direction"}</span>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 relative z-10">
-                <div className="md:col-span-2 aspect-[1.55] rounded-2xl overflow-hidden border border-white/15 relative bg-[#2b2926]">
-                  {imageUrl && !imageLoading ? (
-                    <Image src={imageUrl} alt="Generated visual reference" fill unoptimized className="object-cover opacity-80" />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-xs text-white/50">Awaiting visual reference</div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                  <span className="absolute bottom-3 left-3 text-[10px] uppercase tracking-widest font-bold">Material / atmosphere</span>
-                </div>
-                {studioData.colors.slice(0, 2).map((color) => (
-                  <div key={color.hex} className="aspect-square rounded-2xl p-3 flex flex-col justify-end" style={{ backgroundColor: color.hex, color: getReadableTextColor(color.hex) }}>
-                    <span className="text-[10px] uppercase tracking-widest font-bold opacity-70">{color.role}</span>
-                    <span className="text-sm font-mono mt-1">{color.hex.toUpperCase()}</span>
+              <div className="relative z-10 grid md:grid-cols-2 gap-4">
+                <div className="rounded-2xl border border-white/15 bg-white/10 p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-[#9fb7ff]" />
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-white/60">Words to explore</span>
                   </div>
-                ))}
-                <div className="aspect-square rounded-2xl bg-[#F0E2C6] text-[#121212] p-4 flex flex-col justify-between">
-                  <span className="text-[10px] uppercase tracking-widest font-bold opacity-60">Type voice</span>
-                  <div>
-                    <span className="block text-3xl leading-none" style={{ fontFamily: `'${headingFontName}', serif` }}>Aa</span>
-                    <span className="block text-xs mt-2" style={{ fontFamily: `'${bodyFontName}', sans-serif` }}>{headingFontName}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4 border-t border-white/15 pt-5 relative z-10">
-                <div>
-                  <span className="text-[10px] uppercase tracking-widest text-white/45 font-bold">Concept signal</span>
-                  <p className="font-serif text-lg mt-1">{activeConcept?.tagline || studioData.creativeBrief?.coreThesis}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] uppercase tracking-widest text-white/45 font-bold">Keywords to explore</span>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {(brandData?.keywords || ["Tactile", "Distinctive", "Intentional"]).slice(0, 5).map(keyword => (
-                      <span key={keyword} className="text-[11px] border border-white/20 rounded-full px-2.5 py-1 text-white/75">{keyword}</span>
+                  <div className="flex flex-wrap gap-2">
+                    {[...(brandData?.keywords || []), ...(activeConcept?.emotion ? [activeConcept.emotion] : []), "Tactile", "Precise"].slice(0, 8).map((keyword) => (
+                      <button key={keyword} onClick={() => copyToolkitItem(keyword, keyword)} className="text-sm border border-white/20 rounded-full px-3 py-1.5 text-white/85 hover:bg-white hover:text-[#111b42] transition-colors">
+                        {copiedToolkitItem === keyword ? "Copied" : keyword}
+                      </button>
                     ))}
                   </div>
+                  <p className="text-xs leading-relaxed text-white/55 mt-4">Use these as search terms for references, material studies, casting, locations, and copy tone.</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/15 bg-white/10 p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MessageCircle className="w-4 h-4 text-[#9fb7ff]" />
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-white/60">Copy starter</span>
+                  </div>
+                  <p className="font-serif text-xl leading-snug">“{activeConcept?.tagline || studioData.creativeBrief?.coreThesis}”</p>
+                  <button onClick={() => copyToolkitItem("copy", activeConcept?.tagline || studioData.creativeBrief?.coreThesis || "")} className="mt-4 text-[10px] uppercase tracking-widest font-bold text-[#9fb7ff] hover:text-white transition-colors">
+                    {copiedToolkitItem === "copy" ? "Copied to clipboard" : "Copy to clipboard"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative z-10 border-t border-white/15 pt-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Megaphone className="w-4 h-4 text-[#9fb7ff]" />
+                  <span className="text-[10px] uppercase tracking-widest font-bold text-white/60">Campaign territories</span>
+                </div>
+                <div className="grid md:grid-cols-3 gap-3">
+                  {campaignFormats.map((format) => (
+                    <button key={format.label} onClick={() => copyToolkitItem(format.label, `${format.label}: ${format.description}`)} className="text-left rounded-2xl border border-white/15 p-4 hover:bg-white/10 transition-colors">
+                      <span className="text-xs uppercase tracking-widest font-bold text-[#9fb7ff]">{format.label}</span>
+                      <span className="block text-sm font-semibold mt-2">{format.channel}</span>
+                      <span className="block text-xs text-white/55 leading-relaxed mt-2">{copiedToolkitItem === format.label ? "Campaign direction copied" : format.description}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
 
-            {/* 5. INSTAGRAM SOCIAL CAMPAIGN POST MOCKUP */}
-            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#E2DACD] shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <InstagramIcon className="w-4 h-4 text-[#B85D19]" />
-                  <h3 className="font-serif text-xl font-medium">Instagram Brand Campaign Post</h3>
+            {/* 5. CAMPAIGN STARTER */}
+            <div className="bg-white p-6 md:p-8 rounded-3xl border border-[#D8E2EE] shadow-sm space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-[#315EF6]" />
+                    <h3 className="font-serif text-xl font-medium">Campaign starter plan</h3>
+                  </div>
+                  <p className="text-sm text-[#121212]/60 mt-2 max-w-2xl">A practical first sprint for turning the direction into a visible campaign.</p>
                 </div>
-                <button 
-                  onClick={() => triggerFluxRender(
-                    studioData.heroPrompt,
-                    brandDesc,
-                    studioData.colors,
-                    studioData.typography?.heading?.font,
-                    studioData.typography?.body?.font,
-                    brandData?.concepts.find(c => c.id === selectedConcept)?.style
-                  )}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 border border-[#E2DACD] rounded-full hover:bg-[#F9F6F0] transition-colors"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${imageLoading ? 'animate-spin' : ''}`} />
-                  Re-render Post
-                </button>
+                <span className="hidden sm:block text-[10px] uppercase tracking-widest text-[#315EF6] font-bold">01 / 04</span>
               </div>
 
-              <div className="flex justify-center py-2">
-                <div className="w-full max-w-md bg-[#FAF8F5] border border-[#E2DACD] rounded-3xl p-4 shadow-lg flex flex-col gap-3">
-                  <div className="flex items-center gap-2.5 pb-2 border-b border-[#E2DACD]/60">
-                    <div className="w-7 h-7 rounded-full bg-[#121212] flex items-center justify-center text-white text-[10px] font-bold uppercase">
-                      {brandDesc.slice(0, 2)}
-                    </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                {(studioData.creativeBrief?.doList || []).slice(0, 3).map((item, index) => (
+                  <div key={item} className="flex gap-3 rounded-2xl bg-[#F4F7FB] border border-[#D8E2EE] p-4">
+                    <span className="text-xs font-mono text-[#315EF6]">0{index + 1}</span>
                     <div>
-                      <span className="text-xs font-bold block leading-tight">{brandDesc.toLowerCase().replace(/\s+/g, '_')}</span>
-                      <span className="text-[10px] text-[#121212]/50 block leading-tight">Sponsored Brand Edition</span>
+                      <span className="text-[10px] uppercase tracking-widest font-bold text-[#121212]/45">Make</span>
+                      <p className="text-sm leading-relaxed mt-1">{item}</p>
                     </div>
                   </div>
+                ))}
+              </div>
 
-                  {imageLoading ? (
-                    <div className="aspect-square w-full rounded-2xl bg-[#EFE9DF] flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-8 h-8 animate-spin text-[#B85D19]" />
-                      <span className="text-xs text-[#121212]/60 font-medium">Synthesizing Instagram campaign mockup...</span>
-                    </div>
-                  ) : imageUrl ? (
-                    <div className="aspect-square w-full rounded-2xl overflow-hidden shadow-inner border border-black/5 relative bg-black">
-                      <Image src={imageUrl} alt="Instagram Campaign Mockup" fill unoptimized className="object-cover" />
-                      <div className="absolute inset-0 p-6 md:p-8 flex flex-col justify-between" style={{ background: `linear-gradient(160deg, ${studioData.colors[0].hex}dd 0%, transparent 45%, ${studioData.colors[2].hex}cc 100%)`, color: getReadableTextColor(studioData.colors[0].hex) }}>
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="text-[10px] uppercase tracking-[0.18em] font-bold border border-current/40 rounded-full px-2.5 py-1">{activeConcept?.style || "New identity"}</span>
-                          <span className="text-xs font-mono opacity-80">01 / 04</span>
-                        </div>
-                        <div className="max-w-[82%]">
-                          <h4 className="text-4xl md:text-5xl leading-[0.92] font-medium" style={{ fontFamily: `'${headingFontName}', serif` }}>{brandDesc}</h4>
-                          <p className="text-xs md:text-sm leading-relaxed mt-3 max-w-xs" style={{ fontFamily: `'${bodyFontName}', sans-serif` }}>{studioData.creativeBrief?.coreThesis}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-1.5 pt-1">
-                    <p className="text-xs leading-relaxed text-[#121212]">
-                      <span className="font-bold mr-1.5">{brandDesc.toLowerCase().replace(/\s+/g, '_')}</span>
-                      {studioData.creativeBrief?.coreThesis}
-                    </p>
-                    <span className="text-[10px] text-[#B85D19] font-semibold block">#brandidentity #{brandDesc.toLowerCase().replace(/\s+/g, '')} #editorialdesign</span>
-                  </div>
-                </div>
+              <div className="border-t border-[#D8E2EE] pt-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-[#121212]/60"><span className="font-bold text-[#121212]">First deliverable:</span> 6 references, 3 headline routes, 1 hero asset.</div>
+                <button onClick={() => copyToolkitItem("brief", `Brand: ${brandDesc}\nDirection: ${activeConcept?.title || activeConcept?.style || "Art direction"}\nThesis: ${studioData.creativeBrief?.coreThesis}\nFirst deliverable: 6 references, 3 headline routes, 1 hero asset.`)} className="flex items-center gap-2 text-xs font-semibold text-[#315EF6] hover:text-[#254edb] transition-colors">
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedToolkitItem === "brief" ? "Brief copied" : "Copy mini brief"}
+                </button>
               </div>
             </div>
 
