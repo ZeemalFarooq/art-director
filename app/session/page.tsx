@@ -130,7 +130,13 @@ export default function SessionPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = localStorage.getItem("art_director_history");
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  });
   const [copiedToolkitItem, setCopiedToolkitItem] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -143,18 +149,7 @@ export default function SessionPage() {
     }
   ]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const stored = localStorage.getItem("art_director_history");
-        if (stored) setSavedSessions(JSON.parse(stored));
-      } catch {
-        // Ignore malformed local history and keep the empty archive.
-      }
-    }, 0);
 
-    return () => window.clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1102,7 +1097,7 @@ export default function SessionPage() {
             <button 
               type="button"
               onClick={(e) => handleSend(e)}
-              disabled={!input.trim() || showCards || loading || generatingDna || studioLoading}
+              disabled={!input.trim() || loading || generatingDna || studioLoading}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-[#121212] text-[#F9F6F0] rounded-full flex items-center justify-center hover:bg-[#B85D19] disabled:opacity-50 transition-all duration-200"
             >
               <Send className="w-4 h-4" />

@@ -145,7 +145,6 @@ export default function Home() {
       <footer className="w-full flex justify-between items-center text-[11px] font-mono text-[#111318]/50 border-t border-[#D8E2EE] pt-3 shrink-0 relative z-20">
         <span>Studio Edition &copy; 2026</span>
         <div className="flex items-center gap-4">
-          <span className="hover:text-[#315EF6] transition-colors cursor-pointer" onClick={() => setShowHowItWorks(true)}>Pipeline</span>
           <Link href="/session" className="hover:text-[#315EF6] transition-colors">Launch Workspace</Link>
         </div>
       </footer>

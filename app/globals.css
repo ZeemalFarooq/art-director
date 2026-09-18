@@ -164,6 +164,9 @@
     grid-template-columns: 1fr;
     overflow-y: auto;
   }
+  .prism-stage {
+    display: none;
+  }
 }
 
 .hero-copy {
@@ -191,6 +194,7 @@
   align-items: center;
   justify-content: center;
   animation: stageIn 0.8s 0.1s ease-out both;
+  pointer-events: none;
 }
 
 .visual-grid {
